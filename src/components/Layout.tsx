@@ -63,7 +63,7 @@ export function Layout() {
                 className="link-btn"
                 onClick={() => {
                   resetMockData();
-                  location.pathname === '/' ? window.location.reload() : window.location.assign('/');
+                  location.pathname === '/' ? window.location.reload() : window.location.assign(import.meta.env.BASE_URL);
                 }}
               >
                 Сбросить демо-данные
