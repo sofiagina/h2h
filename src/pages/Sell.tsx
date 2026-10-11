@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
+import { AnimatePresence, m } from 'motion/react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api, USE_MOCK, type EventItem, type PayoutInput, type PayoutMethod, type SellRequest } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { ErrorBox, GuaranteeNote, Spinner } from '../components/ui';
 import { dateLong, money, seatLabel } from '../lib/format';
+import { spring, stepSlide } from '../lib/motion';
 import { useAsync } from '../lib/useAsync';
 
 const BANKS = ['Сбербанк', 'Т-Банк', 'ВТБ', 'Альфа-Банк', 'Газпромбанк', 'Райффайзенбанк', 'Озон Банк', 'Другой банк'];
@@ -45,6 +47,8 @@ export function Sell() {
   const [params] = useSearchParams();
   const events = useAsync(() => api.listEvents({ scope: 'sell' }), []);
   const [step, setStep] = useState(0);
+  /** Направление анимации шага: 1 — вперёд, -1 — назад. */
+  const [dir, setDir] = useState(1);
   const [method, setMethod] = useState<PayoutMethod>('sbp');
   const [event, setEvent] = useState<EventItem | null>(null);
   const [custom, setCustom] = useState(false);
@@ -103,7 +107,10 @@ export function Sell() {
     e?.preventDefault();
     const problem = check(step);
     setStepError(problem);
-    if (!problem) setStep(step + 1);
+    if (!problem) {
+      setDir(1);
+      setStep(step + 1);
+    }
   }
 
   function payoutInput(): PayoutInput {
@@ -150,7 +157,9 @@ export function Sell() {
     return (
       <div className="container section narrow">
         <div className="panel center">
-          <div className="big-check" aria-hidden>✓</div>
+          <m.div className="big-check" aria-hidden initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 380, damping: 16 }}>
+            ✓
+          </m.div>
           <h1 className="h2">Билет отправлен на проверку</h1>
           <p className="muted">
             {done.status === 'review'
@@ -181,11 +190,13 @@ export function Sell() {
           <span>Шаг {step + 1} из {STEPS.length}</span>
         </div>
         <div className="progress__track" role="progressbar" aria-valuemin={1} aria-valuemax={STEPS.length} aria-valuenow={step + 1}>
-          <span style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} />
+          <m.span initial={false} animate={{ width: `${((step + 1) / STEPS.length) * 100}%` }} transition={spring} />
         </div>
       </div>
 
       <form className="panel" onSubmit={next}>
+        <AnimatePresence mode="wait" custom={dir} initial={false}>
+        <m.div key={step} custom={dir} variants={stepSlide} initial="enter" animate="center" exit="exit">
         {step === 0 && (
           <>
             {event || custom ? (
@@ -325,9 +336,11 @@ export function Sell() {
           </div>
         )}
 
+        </m.div>
+        </AnimatePresence>
         {stepError && <p className="field-error">{stepError}</p>}
         <div className="actions">
-          {step > 0 && <button type="button" className="btn btn--ghost" onClick={() => { setStepError(null); setStep(step - 1); }}>Назад</button>}
+          {step > 0 && <button type="button" className="btn btn--ghost" onClick={() => { setStepError(null); setDir(-1); setStep(step - 1); }}>Назад</button>}
           {step < 3 ? (
             <button className="btn btn--primary">Далее</button>
           ) : (

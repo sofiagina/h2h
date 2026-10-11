@@ -1,7 +1,9 @@
+import { m } from 'motion/react';
 import { useState, type FormEvent } from 'react';
 import type { Attachment, DisputeAuthor, DisputeMessage } from '../api';
 import { fileSize } from '../lib/files';
 import { dateTime } from '../lib/format';
+import { spring } from '../lib/motion';
 import { FileDrop } from './FileDrop';
 import { ErrorBox } from './ui';
 
@@ -36,21 +38,27 @@ function AttachmentItem({ a }: { a: Attachment }) {
 export function MessageList({ messages, viewer }: { messages: DisputeMessage[]; viewer: DisputeAuthor }) {
   return (
     <ol className="thread">
-      {messages.map((m) => (
-        <li key={m.id} className={`msg msg--${m.author} ${m.author === viewer ? 'msg--mine' : ''}`}>
+      {messages.map((msg) => (
+        <m.li
+          key={msg.id}
+          className={`msg msg--${msg.author} ${msg.author === viewer ? 'msg--mine' : ''}`}
+          initial={{ opacity: 0, x: msg.author === viewer ? 16 : -16 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={spring}
+        >
           <div className="msg__head">
-            <b>{m.author === viewer ? 'Вы' : AUTHOR[m.author]}</b>
-            <span>{dateTime(m.at)}</span>
+            <b>{msg.author === viewer ? 'Вы' : AUTHOR[msg.author]}</b>
+            <span>{dateTime(msg.at)}</span>
           </div>
-          {m.text && <p>{m.text}</p>}
-          {m.attachments.length > 0 && (
+          {msg.text && <p>{msg.text}</p>}
+          {msg.attachments.length > 0 && (
             <div className="msg__files">
-              {m.attachments.map((a) => (
+              {msg.attachments.map((a) => (
                 <AttachmentItem key={a.id} a={a} />
               ))}
             </div>
           )}
-        </li>
+        </m.li>
       ))}
     </ol>
   );

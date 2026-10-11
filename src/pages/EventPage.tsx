@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
+import { AnimatePresence, m } from 'motion/react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, type Offer } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { ErrorBox, GuaranteeNote, Spinner } from '../components/ui';
 import { cover, dateLong, money, plural } from '../lib/format';
+import { spring } from '../lib/motion';
 import { useAsync } from '../lib/useAsync';
 
 /** Строка списка: одно место или несколько одинаковых билетов без места (танцпол). */
@@ -109,10 +111,18 @@ export function EventPage() {
 
           {lines.length > 0 && (
             <ul className="tickets">
-              {lines.map((l) => {
+              <AnimatePresence initial={false} mode="popLayout">
+              {lines.map((l, i) => {
                 const o = l.offers[0];
                 return (
-                  <li key={l.key} className="ticket-row">
+                  <m.li
+                    key={l.key}
+                    className="ticket-row"
+                    layout
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0, transition: { ...spring, delay: Math.min(i, 12) * 0.02 } }}
+                    exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.12 } }}
+                  >
                     <div>
                       <b>{o.seat.sector}</b>
                       <span className="muted">{seatText(o)}</span>
@@ -126,9 +136,10 @@ export function EventPage() {
                     <button className="btn btn--primary btn--sm" disabled={!ev.salesEnabled || busyId !== null} onClick={() => buy(o)}>
                       {busyId === o.id ? 'Бронируем…' : 'Купить'}
                     </button>
-                  </li>
+                  </m.li>
                 );
               })}
+              </AnimatePresence>
             </ul>
           )}
 

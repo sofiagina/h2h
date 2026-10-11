@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { LazyMotion, MotionConfig } from 'motion/react';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
 import { Layout } from './components/Layout';
@@ -18,6 +19,8 @@ import './styles.css';
 // Тему ставим до первого рендера, чтобы не мигало светлым.
 applyTheme(getTheme());
 
+const loadMotion = () => import('./lib/motionFeatures').then((r) => r.default);
+
 function NotFound() {
   return (
     <div className="container section narrow center">
@@ -29,6 +32,8 @@ function NotFound() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <LazyMotion features={loadMotion} strict>
+    <MotionConfig reducedMotion="user">
     <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
       <AuthProvider>
         <Routes>
@@ -47,5 +52,7 @@ createRoot(document.getElementById('root')!).render(
         </Routes>
       </AuthProvider>
     </BrowserRouter>
+    </MotionConfig>
+    </LazyMotion>
   </StrictMode>,
 );

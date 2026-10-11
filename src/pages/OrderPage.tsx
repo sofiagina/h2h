@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { m } from 'motion/react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, type Order, type OrderStatus } from '../api';
 import { Composer } from '../components/DisputeThread';
@@ -72,7 +73,13 @@ export function OrderPage() {
 
         {o.status === 'ISSUED' &&
           o.tickets.map((t) => (
-            <div key={t.id} className="ticket">
+            <m.div
+              key={t.id}
+              className="ticket"
+              initial={{ opacity: 0, y: 24, scale: 0.96, rotateX: 12 }}
+              animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+            >
               <div className="ticket__main">
                 <span className="eyebrow">{o.escrow ? 'Билет от продавца' : 'Ваш билет'}</span>
                 <h3>{o.event.title}</h3>
@@ -88,7 +95,7 @@ export function OrderPage() {
               <div className="ticket__code">
                 <TicketCode value={t.barcode} />
               </div>
-            </div>
+            </m.div>
           ))}
 
         <DisputeSection order={o} />

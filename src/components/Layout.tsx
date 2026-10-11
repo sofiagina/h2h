@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { AnimatePresence, m } from 'motion/react';
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { USE_MOCK } from '../api';
 import { resetMockData } from '../api/mock';
 import { useAuth } from '../auth/AuthContext';
+import { page } from '../lib/motion';
 import { applyTheme, getTheme, isDarkNow, type Theme } from '../lib/theme';
 
 export function Layout() {
@@ -60,14 +62,24 @@ export function Layout() {
             <Link to="/sell" className="btn btn--primary btn--sm">Продать билет</Link>
           </nav>
           <button className="theme-btn" onClick={toggleTheme} aria-label={dark ? 'Включить светлую тему' : 'Включить тёмную тему'} title={dark ? 'Светлая тема' : 'Тёмная тема'}>
-            {dark ? '☀' : '☾'}
+            <AnimatePresence mode="wait" initial={false}>
+              <m.span
+                key={dark ? 'sun' : 'moon'}
+                initial={{ rotate: -90, opacity: 0, scale: 0.6 }}
+                animate={{ rotate: 0, opacity: 1, scale: 1 }}
+                exit={{ rotate: 90, opacity: 0, scale: 0.6 }}
+                transition={{ duration: 0.18 }}
+              >
+                {dark ? '☀' : '☾'}
+              </m.span>
+            </AnimatePresence>
           </button>
         </div>
       </header>
 
-      <main>
+      <m.main key={location.pathname} variants={page} initial="hidden" animate="show">
         <Outlet />
-      </main>
+      </m.main>
 
       <footer className="footer">
         <div className="container footer__inner">

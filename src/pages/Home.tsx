@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { m } from 'motion/react';
 import { api } from '../api';
 import { EventCard } from '../components/EventCard';
 import { Empty, ErrorBox, Spinner } from '../components/ui';
+import { item, list } from '../lib/motion';
 import { useAsync } from '../lib/useAsync';
 
 export function Home() {
@@ -58,11 +60,13 @@ export function Home() {
           </Empty>
         )}
         {!!events.data?.length && (
-          <div className={`list ${events.loading ? 'is-loading' : ''}`}>
+          <m.div className={`list ${events.loading ? 'is-loading' : ''}`} variants={list} initial="hidden" animate="show" key={`${query}|${city}`}>
             {events.data.map((e) => (
-              <EventCard key={e.id} event={e} />
+              <m.div key={e.id} variants={item}>
+                <EventCard event={e} />
+              </m.div>
             ))}
-          </div>
+          </m.div>
         )}
       </section>
 
