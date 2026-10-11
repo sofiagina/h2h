@@ -10,6 +10,7 @@ import { Checkout } from './pages/Checkout';
 import { DisputePage } from './pages/DisputePage';
 import { EventPage } from './pages/EventPage';
 import { Home } from './pages/Home';
+import { HowItWorks } from './pages/HowItWorks';
 import { Login } from './pages/Login';
 import { OrderPage } from './pages/OrderPage';
 import { Sell } from './pages/Sell';
@@ -44,6 +45,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="orders/:orderId" element={<OrderPage />} />
             <Route path="disputes/:orderId" element={<DisputePage />} />
             <Route path="sell" element={<Sell />} />
+            <Route path="how" element={<HowItWorks />} />
             <Route path="login" element={<Login />} />
             <Route path="account" element={<Account />} />
             <Route path="admin" element={<Admin />} />

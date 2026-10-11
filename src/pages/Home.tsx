@@ -1,90 +1,283 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
 import { m } from 'motion/react';
-import { api } from '../api';
-import { EventCard } from '../components/EventCard';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { api, type EventGroup, type EventItem } from '../api';
+import { useAuth } from '../auth/AuthContext';
+import { Carousel, EventLine, EventTile } from '../components/Discovery';
+import { IconArrowRight, IconClose, IconPin, IconSearch, IconSparkle } from '../components/icons';
 import { Empty, ErrorBox, Spinner } from '../components/ui';
+import { CATEGORIES, categoryOf } from '../lib/categories';
+import { cover } from '../lib/format';
 import { item, list } from '../lib/motion';
 import { useAsync } from '../lib/useAsync';
+
+const LIKES_KEY = 'h2h.likes';
+const BANNER_KEY = 'h2h.likesBanner';
+
+/** Любимые разделы — удобство конкретного браузера, поэтому в localStorage. */
+function readLikes(): EventGroup[] {
+  try {
+    return JSON.parse(localStorage.getItem(LIKES_KEY) ?? '[]');
+  } catch {
+    return [];
+  }
+}
+function readStore(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function store(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* приватный режим */
+  }
+}
 
 export function Home() {
   const [params, setParams] = useSearchParams();
   const query = params.get('q') ?? '';
   const city = params.get('city') ?? '';
+  const group = (params.get('group') ?? '') as EventGroup | '';
+  const tab = params.get('tab') === 'fav' ? 'fav' : 'discover';
   const [q, setQ] = useState(query);
   useEffect(() => setQ(query), [query]);
 
-  const cities = useAsync(() => api.listCities(), []);
-  const events = useAsync(() => api.listEvents({ q: query, city }), [query, city]);
-
-  const setParam = (key: string, value: string) => {
+  const setParam = (patch: Record<string, string>) => {
     const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
-    else next.delete(key);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) next.set(k, v);
+      else next.delete(k);
+    }
     setParams(next, { replace: true });
   };
 
+  const filtered = !!(query || group);
+  const cities = useAsync(() => api.listCities(), []);
+
   function search(e: FormEvent) {
     e.preventDefault();
-    setParam('q', q.trim());
+    setParam({ q: q.trim(), tab: '' });
   }
 
   return (
     <>
       <section className="hero">
+        <div className="hero__lights" aria-hidden />
         <div className="container hero__inner">
-          <h1>Билеты на распроданные концерты по номиналу</h1>
-          <p className="lead">Покупайте у тех, кто не может пойти.</p>
+          <m.h1 initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+            Билеты от зрителей. По номиналу.
+          </m.h1>
           <form className="hero__search" onSubmit={search} role="search">
-            <input className="input" type="search" placeholder="Артист, концерт или город" value={q} onChange={(e) => setQ(e.target.value)} />
-            <button className="btn btn--primary">Найти</button>
+            <IconSearch size={20} />
+            <input type="search" placeholder="Концерт, артист, площадка или город" value={q} onChange={(e) => setQ(e.target.value)} />
           </form>
-          <div className="chips">
-            <button className={`chip ${!city ? 'chip--on' : ''}`} onClick={() => setParam('city', '')}>Все города</button>
-            {cities.data?.map((c) => (
-              <button key={c} className={`chip ${city === c ? 'chip--on' : ''}`} onClick={() => setParam('city', c)}>{c}</button>
-            ))}
-          </div>
         </div>
       </section>
 
-      <section className="container section">
-        <div className="section__head">
-          <h2>{query ? `Найдено по «${query}»` : city ? `Концерты: ${city}` : 'Ближайшие концерты'}</h2>
+      <div className="subnav">
+        <div className="container subnav__inner">
+          <div className="subnav__tabs" role="tablist">
+            <button role="tab" aria-selected={tab === 'discover'} className={tab === 'discover' ? 'on' : ''} onClick={() => setParam({ tab: '' })}>
+              Подборка
+            </button>
+            <button role="tab" aria-selected={tab === 'fav'} className={tab === 'fav' ? 'on' : ''} onClick={() => setParam({ tab: 'fav', q: '', group: '' })}>
+              Избранное
+            </button>
+          </div>
+          <label className="city-select">
+            <IconPin size={18} />
+            <select value={city} onChange={(e) => setParam({ city: e.target.value })} aria-label="Город">
+              <option value="">Все города</option>
+              {cities.data?.map((c) => <option key={c}>{c}</option>)}
+            </select>
+          </label>
         </div>
-        {events.error && <ErrorBox error={events.error} onRetry={() => events.reload()} />}
-        {events.loading && !events.data && <Spinner />}
-        {events.data?.length === 0 && (
-          <Empty title="Ничего не нашли">
-            <p className="muted">Попробуйте другой запрос.</p>
-          </Empty>
+      </div>
+
+      <div className="container section">
+        {tab === 'fav' ? (
+          <Favorites />
+        ) : filtered ? (
+          <Results query={query} city={city} group={group} onReset={() => setParam({ q: '', group: '' })} />
+        ) : (
+          <Discover city={city} cities={cities.data ?? []} onGroup={(g) => setParam({ group: g })} onCity={(c) => setParam({ city: c })} />
         )}
-        {!!events.data?.length && (
-          <m.div className={`list ${events.loading ? 'is-loading' : ''}`} variants={list} initial="hidden" animate="show" key={`${query}|${city}`}>
-            {events.data.map((e) => (
-              <m.div key={e.id} variants={item}>
-                <EventCard event={e} />
-              </m.div>
+      </div>
+    </>
+  );
+}
+
+function Discover({ city, cities, onGroup, onCity }: { city: string; cities: string[]; onGroup(g: EventGroup): void; onCity(c: string): void }) {
+  const events = useAsync(() => api.listEvents({ city }), [city]);
+  const [likes, setLikes] = useState<EventGroup[]>(readLikes);
+  const [banner, setBanner] = useState(() => readLikes().length === 0 && readStore(BANNER_KEY) !== 'hidden');
+  const [picking, setPicking] = useState(false);
+
+  const all = useMemo(() => events.data ?? [], [events.data]);
+  const popular = useMemo(() => [...all].sort((a, b) => b.availableCount + b.waitlistCount - (a.availableCount + a.waitlistCount)).slice(0, 8), [all]);
+  const concerts = useMemo(() => all.filter((e) => e.group === 'concerts').slice(0, 6), [all]);
+  const forYou = useMemo(() => all.filter((e) => likes.includes(e.group)), [all, likes]);
+
+  if (events.error) return <ErrorBox error={events.error} onRetry={() => events.reload()} />;
+  if (!events.data) return <Spinner />;
+
+  const toggleLike = (g: EventGroup) => setLikes((l) => (l.includes(g) ? l.filter((x) => x !== g) : [...l, g]));
+
+  return (
+    <>
+      {banner && (
+        <m.div className="banner" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
+          <IconSparkle size={34} className="banner__icon" />
+          <div className="banner__text">
+            <b>Расскажите, что вам нравится</b>
+            {picking ? (
+              <div className="chips">
+                {CATEGORIES.map((c) => (
+                  <button key={c.slug} className={`chip ${likes.includes(c.slug) ? 'chip--on' : ''}`} onClick={() => toggleLike(c.slug)}>
+                    {c.title}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <span>Отметьте любимые разделы, и подборка станет точнее.</span>
+            )}
+          </div>
+          {picking ? (
+            <button
+              className="btn btn--primary btn--sm"
+              onClick={() => {
+                store(LIKES_KEY, JSON.stringify(likes));
+                setBanner(false);
+              }}
+            >
+              Готово
+            </button>
+          ) : (
+            <button className="btn btn--primary btn--sm" onClick={() => setPicking(true)}>Выбрать</button>
+          )}
+          <button
+            className="banner__close"
+            aria-label="Скрыть"
+            onClick={() => {
+              store(BANNER_KEY, 'hidden');
+              setBanner(false);
+            }}
+          >
+            <IconClose size={18} />
+          </button>
+        </m.div>
+      )}
+
+      <section className="block">
+        <div className="block__head"><h2>Выберите, куда пойти</h2></div>
+        <m.div className="cats" variants={list} initial="hidden" animate="show">
+          {CATEGORIES.map(({ slug, title, Icon, color }) => (
+            <m.button key={slug} className="cat" variants={item} whileHover={{ y: -2 }} onClick={() => onGroup(slug)}>
+              <span>{title}</span>
+              <Icon size={26} style={{ color }} />
+            </m.button>
+          ))}
+        </m.div>
+      </section>
+
+      {forYou.length > 0 && (
+        <Carousel title="Для вас" hint={likes.map((g) => categoryOf(g).title).join(', ')}>
+          {forYou.map((e) => <EventTile key={e.id} event={e} />)}
+        </Carousel>
+      )}
+
+      {popular.length > 0 && (
+        <Carousel title={city ? `Популярное: ${city}` : 'Популярное рядом'} hint="Больше всего билетов и желающих">
+          {popular.map((e) => <EventTile key={e.id} event={e} />)}
+        </Carousel>
+      )}
+
+      {concerts.length > 0 && (
+        <section className="block">
+          <div className="block__head">
+            <h2>Концерты, на которые стоит успеть</h2>
+            <button className="pill" onClick={() => onGroup('concerts')}>Все <IconArrowRight size={16} /></button>
+          </div>
+          <m.div className="lines" variants={list} initial="hidden" animate="show">
+            {concerts.map((e) => (
+              <m.div key={e.id} variants={item}><EventLine event={e} /></m.div>
             ))}
           </m.div>
-        )}
-      </section>
+        </section>
+      )}
 
-      <section className="container section how">
-        <h2>Как это работает</h2>
-        <ol className="how__steps">
-          <li><b>1</b><strong>Продавец выставляет билет</strong><span>Мы проверяем его у организатора.</span></li>
-          <li><b>2</b><strong>Вы покупаете по номиналу</strong><span>Картой или по СБП.</span></li>
-          <li><b>3</b><strong>Организатор перевыпускает билет</strong><span>Новый билет оформят на вас.</span></li>
-        </ol>
-        <div className="how__sell">
-          <div>
-            <strong>Не можете пойти?</strong>
-            <span className="muted">Продайте его по номиналу.</span>
-          </div>
-          <Link to="/sell" className="btn btn--primary">Продать билет</Link>
+      {!city && cities.length > 0 && (
+        <Carousel title="Города">
+          {cities.map((c) => (
+            <button key={c} className="city-tile" style={cover(c)} onClick={() => onCity(c)}>
+              <b>{c}</b>
+              <small>{all.filter((e) => e.venue.city === c).length} концертов</small>
+            </button>
+          ))}
+        </Carousel>
+      )}
+
+      <section className="block how-strip">
+        <div>
+          <b>Не можете пойти?</b>
+          <span>Продайте билет по номиналу. Организатор оформит его на покупателя.</span>
+        </div>
+        <div className="actions">
+          <Link to="/how" className="btn btn--ghost btn--sm">Как это работает</Link>
+          <Link to="/sell" className="btn btn--primary btn--sm">Продать билет</Link>
         </div>
       </section>
     </>
+  );
+}
+
+function Results({ query, city, group, onReset }: { query: string; city: string; group: EventGroup | ''; onReset(): void }) {
+  const events = useAsync(() => api.listEvents({ q: query, city, group: group || undefined }), [query, city, group]);
+  const title = [query && `«${query}»`, group && categoryOf(group).title, city].filter(Boolean).join(' · ');
+  return (
+    <section className="block">
+      <div className="block__head">
+        <h2>{title}</h2>
+        <button className="pill" onClick={onReset}>Сбросить <IconClose size={14} /></button>
+      </div>
+      {events.error && <ErrorBox error={events.error} onRetry={() => events.reload()} />}
+      {!events.data && !events.error && <Spinner />}
+      {events.data?.length === 0 && <Empty title="Ничего не нашли"><p className="muted">Попробуйте другой запрос.</p></Empty>}
+      {!!events.data?.length && <EventGrid events={events.data} />}
+    </section>
+  );
+}
+
+function Favorites() {
+  const { user } = useAuth();
+  const favs = useAsync(() => (user ? api.myFavorites() : Promise.resolve([])), [user?.id]);
+  if (!user)
+    return (
+      <Empty title="Избранное доступно после входа">
+        <Link to="/login?next=%2F%3Ftab%3Dfav" className="btn btn--primary">Войти</Link>
+      </Empty>
+    );
+  if (favs.error) return <ErrorBox error={favs.error} onRetry={() => favs.reload()} />;
+  if (!favs.data) return <Spinner />;
+  if (!favs.data.length)
+    return (
+      <Empty title="Пока пусто">
+        <p className="muted">Отмечайте концерты звёздочкой, и они появятся здесь.</p>
+      </Empty>
+    );
+  return <EventGrid events={favs.data} />;
+}
+
+function EventGrid({ events }: { events: EventItem[] }) {
+  return (
+    <m.div className="lines" variants={list} initial="hidden" animate="show">
+      {events.map((e) => (
+        <m.div key={e.id} variants={item}><EventLine event={e} /></m.div>
+      ))}
+    </m.div>
   );
 }

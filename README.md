@@ -41,7 +41,8 @@ npm run dev
 
 | Страница | Путь | Что делает |
 | --- | --- | --- |
-| Главная | `/` | Большой поиск, фильтр по городу, список концертов с количеством билетов и ценой «от» |
+| Главная | `/` | Первый экран с поиском; вкладки «Подборка / Избранное»; категории; карусели «Популярное рядом», «Для вас», «Города»; концерты в две колонки со звёздочкой «в избранное» |
+| Как это работает | `/how` | Почему мы, шаги для покупателя и продавца, оформление через организатора, частые вопросы |
 | Концерт | `/events/:id` | Список билетов, у каждого кнопка «Купить»; фильтр по сектору; «Уведомить меня»; пауза продаж, если API организатора не отвечает |
 | Оформление | `/checkout/:orderId` | Таймер брони 15 минут, данные покупателя, оплата |
 | Заказ | `/orders/:orderId` | Статусы RESERVED → PAID → ISSUED с опросом, новый билет с кодом, кнопка «Проблема с билетом? Открыть спор» |
@@ -84,9 +85,11 @@ npm run dev
 | POST | `/auth/otp/verify` | `{ email, code }` → `{ accessToken, user }` |
 | POST | `/auth/refresh` | → `{ accessToken }` |
 | GET | `/users/me` | → `User` |
-| GET | `/events?q=&city=&scope=` | → `EventItem[]`. `scope=catalog` (по умолчанию): только предстоящие; концерты без организатора — только пока есть билеты. `scope=sell`: все предстоящие — для поиска в форме продавца |
+| GET | `/events?q=&city=&group=&scope=` | → `EventItem[]`. `group` — раздел витрины: `concerts`, `festivals`, `theatre`, `standup`, `classic`, `kids`, `sport`, `club`. `scope=catalog` (по умолчанию): только предстоящие; концерты без организатора — только пока есть билеты. `scope=sell`: все предстоящие — для поиска в форме продавца |
 | GET | `/events/cities` | → `string[]` |
-| GET | `/events/{id}` | → `EventItem` (с `salesEnabled`, `minFaceValue`, `availableCount`, `waitlistCount`) |
+| PUT · DELETE | `/events/{id}/favorite` | добавить или убрать из избранного → 204 |
+| GET | `/users/me/favorites` | → `EventItem[]` (только предстоящие) |
+| GET | `/events/{id}` | → `EventItem` (с `group`, `salesEnabled`, `minFaceValue`, `availableCount`, `waitlistCount`, `isFavorite` — для гостя `false`) |
 | GET | `/events/{id}/offers` | → `Offer[]` (только свободные, от дешёвых к дорогим) |
 | POST | `/events/{id}/waitlist` | → `WaitlistEntry` |
 | POST | `/orders` + `Idempotency-Key` | `{ offerId }` → `Order` в статусе `RESERVED` с `expiresAt` |
@@ -116,7 +119,7 @@ npm run dev
 src/
   api/        types.ts — контракт; http.ts — клиент к бэкенду; mock.ts — мок с теми же правилами
   auth/       контекст входа
-  components/ шапка/подвал, строка концерта, статусы, загрузка файлов, переписка спора
+  components/ шапка/подвал, свои иконки (icons.tsx), карточки и карусели витрины, статусы, загрузка файлов, переписка спора
   pages/      страницы из таблицы выше
   lib/        форматирование, проверка и сжатие файлов, хук загрузки
 ```

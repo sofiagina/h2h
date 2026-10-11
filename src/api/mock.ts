@@ -19,6 +19,7 @@ import {
   type Attachment,
   type DisputeAuthor,
   type DisputeView,
+  type EventGroup,
   type EventItem,
   type EventRef,
   type Guarantee,
@@ -40,9 +41,11 @@ const ISSUE_AFTER_MS = 2500;
 const LIST_AFTER_MS = 3000;
 const DAY = 24 * 3600_000;
 
-type EventRow = Omit<EventItem, 'salesEnabled' | 'minFaceValue' | 'availableCount' | 'waitlistCount'> & {
+type EventRow = Omit<EventItem, 'salesEnabled' | 'minFaceValue' | 'availableCount' | 'waitlistCount' | 'isFavorite' | 'group'> & {
   /** Концерт от продавца скрыт, пока модератор его не проверил. */
   published: boolean;
+  /** Если не задан — выводится из жанра (старые данные и концерты от продавцов). */
+  group?: EventGroup;
 };
 type OfferRow = Offer & { state: 'available' | 'reserved' | 'sold' };
 type OrderRow = Order & { userId: string; paidAt?: string; issuedAt?: string };
@@ -66,7 +69,13 @@ interface AuditRow {
   reason: string;
 }
 
+interface FavRow {
+  userId: string;
+  eventId: string;
+}
+
 interface DB {
+  favorites: FavRow[];
   users: User[];
   events: EventRow[];
   offers: OfferRow[];
@@ -130,6 +139,52 @@ function offer(eventId: string, seat: Seat, rub: number, guarantee: Guarantee = 
   return { id: id('of'), eventId, seat, faceValue: rub * 100, fee: 0, currency: 'RUB', personalized, guarantee, state: 'available' };
 }
 
+/** Концерты для разделов, которых не было в первой версии демо: театр, спорт, детям, клубы. */
+function extraEvents(): EventRow[] {
+  const base = { status: 'sold_out' as const, organizerConnected: true, published: true };
+  return [
+    {
+      ...base, id: 'ev_swan', title: 'Лебединое озеро', artist: 'Театр балета «Волга»', category: 'Балет', group: 'theatre', ageLimit: 6, aggregatorId: 'agg_volga',
+      description: 'Классическая постановка в двух действиях с живым оркестром.',
+      startsAt: daysFromNow(21, 19), venue: { name: 'Театр «Царицынская сцена»', city: 'Волгоград', address: 'ул. Мира, 15' },
+    },
+    {
+      ...base, id: 'ev_basket', title: 'Кубок Юга по баскетболу. Финал', artist: 'Финал кубка', category: 'Баскетбол', group: 'sport', ageLimit: 0, aggregatorId: 'agg_don',
+      description: 'Решающий матч сезона. Места на трибунах пронумерованы.',
+      startsAt: daysFromNow(16, 18), venue: { name: 'Дворец спорта «Олимп»', city: 'Ростов-на-Дону', address: 'пр. Будённовский, 8' },
+    },
+    {
+      ...base, id: 'ev_tree', title: 'Ёлка «Снежная сказка»', artist: 'Детский театр «Колобок»', category: 'Детский спектакль', group: 'kids', ageLimit: 0, aggregatorId: 'agg_volga',
+      description: 'Новогоднее представление с хороводом и подарками. Длительность 1 час 20 минут.',
+      startsAt: daysFromNow(45, 12), venue: { name: 'ДК «Юность»', city: 'Волгоград', address: 'ул. Рабоче-Крестьянская, 9' },
+    },
+    {
+      ...base, id: 'ev_techno', title: 'Ночь техно', artist: 'Пять диджеев', category: 'Электроника', group: 'club', ageLimit: 18, aggregatorId: 'agg_don',
+      description: 'До утра, два зала. Вход строго 18+ по документу.',
+      startsAt: daysFromNow(13, 23), venue: { name: 'Клуб «Подвал 61»', city: 'Ростов-на-Дону', address: 'ул. Пушкинская, 61' },
+    },
+  ];
+}
+
+function extraOffers(): OfferRow[] {
+  return [
+    offer('ev_swan', { sector: 'Партер', row: '6', place: '11' }, 2600),
+    offer('ev_swan', { sector: 'Бельэтаж', row: '2', place: '4' }, 1900),
+    offer('ev_basket', { sector: 'Трибуна А', row: '3', place: '15' }, 900),
+    offer('ev_basket', { sector: 'Трибуна А', row: '3', place: '16' }, 900),
+    offer('ev_basket', { sector: 'VIP', row: '1', place: '2' }, 3500),
+    offer('ev_tree', { sector: 'Зал', row: '4', place: '7' }, 1200),
+    offer('ev_techno', { sector: 'Входной билет' }, 1500),
+    offer('ev_techno', { sector: 'Входной билет' }, 1500),
+    offer('ev_techno', { sector: 'Входной билет' }, 1500),
+  ];
+}
+
+const GROUP_BY_GENRE: Record<string, EventGroup> = {
+  Фестиваль: 'festivals', Классика: 'classic', Стендап: 'standup', Балет: 'theatre', Театр: 'theatre',
+};
+const groupOf = (e: EventRow): EventGroup => e.group ?? GROUP_BY_GENRE[e.category] ?? 'concerts';
+
 function ref(e: EventRow): EventRef {
   return { id: e.id, title: e.title, startsAt: e.startsAt, venue: e.venue };
 }
@@ -181,6 +236,8 @@ function seed(): DB {
     },
   ];
 
+  events.push(...extraEvents());
+
   const offers: OfferRow[] = [
     offer('ev_mira', { sector: 'Зал', row: '2', place: '5' }, 4200, 'organizer', true),
     offer('ev_mira', { sector: 'Зал', row: '9', place: '17' }, 3200, 'organizer', true),
@@ -198,6 +255,7 @@ function seed(): DB {
   for (const p of [4, 11, 12]) offers.push(offer('ev_wind', { sector: 'Балкон', row: '1', place: String(p) }, 1800));
   for (let i = 0; i < 6; i++) offers.push(offer('ev_standup', { sector: 'Танцпол' }, 2000));
 
+  offers.push(...extraOffers());
   for (const a of aggregators) a.eventsCount = events.filter((e) => e.aggregatorId === a.id).length;
 
   const pendingEvent: EventRow = {
@@ -209,6 +267,7 @@ function seed(): DB {
   events.push(pendingEvent);
 
   return {
+    favorites: [],
     users: [],
     events,
     offers,
@@ -251,6 +310,14 @@ function load(): DB {
 
 /** Заявки, сохранённые до появления карт и счетов: выплата была только по СБП. */
 function normalize(data: DB): DB {
+  data.favorites ??= [];
+  const known = new Set(data.events.map((e) => e.id));
+  const missing = extraEvents().filter((e) => !known.has(e.id));
+  if (missing.length) {
+    data.events.push(...missing);
+    const ids = new Set(missing.map((e) => e.id));
+    data.offers.push(...extraOffers().filter((o) => ids.has(o.eventId)));
+  }
   for (const s of data.sell as (SellRow & { payout: { phoneMasked?: string; bank?: string } })[]) {
     if (s.payout.phoneMasked !== undefined) s.payout = { method: 'sbp', details: `${s.payout.phoneMasked}, ${s.payout.bank ?? ''}` };
   }
@@ -303,6 +370,15 @@ function currentUser(): User {
   return user;
 }
 
+/** Пользователь, если вошёл; для витрины вход не обязателен. */
+function optionalUser(): User | null {
+  try {
+    return currentUser();
+  } catch {
+    return null;
+  }
+}
+
 function requireAdmin(): User {
   const u = currentUser();
   if (u.role !== 'admin') throw new ApiError('FORBIDDEN', 'Раздел доступен только администраторам', 403);
@@ -320,7 +396,7 @@ function salesEnabledFor(e: EventRow | undefined) {
   return !!a && (a.mode === 'force_on' || (a.mode === 'auto' && a.status === 'UP'));
 }
 
-function decorate(e: EventRow): EventItem {
+function decorate(e: EventRow, user: User | null = optionalUser()): EventItem {
   const { published: _hidden, ...rest } = e;
   const available = db.offers.filter((o) => o.eventId === e.id && o.state === 'available');
   return {
@@ -329,6 +405,8 @@ function decorate(e: EventRow): EventItem {
     availableCount: available.length,
     minFaceValue: available.length ? Math.min(...available.map((o) => o.faceValue)) : null,
     waitlistCount: db.waitlist.filter((w) => w.eventId === e.id).length,
+    group: groupOf(e),
+    isFavorite: !!user && db.favorites.some((f) => f.userId === user.id && f.eventId === e.id),
   };
 }
 
@@ -479,13 +557,15 @@ export const mockApi: Api = {
     await delay();
     settle();
     const q = filter.q?.trim().toLowerCase();
+    const user = optionalUser();
     return db.events
       .filter((e) => e.published)
+      .filter((e) => !filter.group || groupOf(e) === filter.group)
       .filter((e) => !filter.city || e.venue.city === filter.city)
       .filter((e) => !q || `${e.title} ${e.artist} ${e.venue.name} ${e.venue.city}`.toLowerCase().includes(q))
       .filter((e) => Date.parse(e.startsAt) > Date.now())
       .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
-      .map(decorate)
+      .map((e) => decorate(e, user))
       .filter((e) => filter.scope === 'sell' || e.organizerConnected || e.availableCount > 0);
   },
 
@@ -693,6 +773,25 @@ export const mockApi: Api = {
         position: db.waitlist.filter((x) => x.eventId === w.eventId).indexOf(w) + 1,
         createdAt: w.createdAt,
       }));
+  },
+
+  async setFavorite(eventId, on) {
+    await delay(150);
+    const user = currentUser();
+    db.favorites = db.favorites.filter((f) => !(f.userId === user.id && f.eventId === eventId));
+    if (on) db.favorites.push({ userId: user.id, eventId });
+    save();
+  },
+
+  async myFavorites() {
+    await delay();
+    const user = currentUser();
+    settle();
+    const ids = new Set(db.favorites.filter((f) => f.userId === user.id).map((f) => f.eventId));
+    return db.events
+      .filter((e) => ids.has(e.id) && e.published && Date.parse(e.startsAt) > Date.now())
+      .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+      .map((e) => decorate(e, user));
   },
 
   async adminAggregators() {

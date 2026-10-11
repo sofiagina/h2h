@@ -5,6 +5,7 @@ import { USE_MOCK } from '../api';
 import { resetMockData } from '../api/mock';
 import { useAuth } from '../auth/AuthContext';
 import { page } from '../lib/motion';
+import { IconHelp, IconMoon, IconSearch, IconSun, IconUser } from './icons';
 import { applyTheme, getTheme, isDarkNow, type Theme } from '../lib/theme';
 
 export function Layout() {
@@ -40,7 +41,8 @@ export function Layout() {
           </Link>
           {location.pathname !== '/' && (
             <form className="header__search" onSubmit={search} role="search">
-              <input className="input" type="search" placeholder="Артист, концерт, город" value={q} onChange={(e) => setQ(e.target.value)} />
+              <IconSearch size={18} />
+              <input type="search" placeholder="Концерт, артист, город" value={q} onChange={(e) => setQ(e.target.value)} />
             </form>
           )}
           <button className="burger" aria-label="Меню" aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -49,14 +51,16 @@ export function Layout() {
           </button>
           <nav className={`nav ${open ? 'nav--open' : ''}`} onClick={close}>
             {user?.role === 'admin' && <NavLink to="/admin">Админка</NavLink>}
+            <NavLink to="/account?tab=tickets" className={() => (location.pathname === '/account' && !location.search.includes('sell') ? 'active' : '')}>Мои билеты</NavLink>
+            <NavLink to="/account?tab=sell" className={() => (location.search.includes('tab=sell') ? 'active' : '')}>Мои продажи</NavLink>
+            <NavLink to="/how" className="nav__icon" title="Как это работает" aria-label="Как это работает"><IconHelp size={22} /></NavLink>
             {user ? (
-              <>
-                <NavLink to="/account">Мои билеты</NavLink>
-                <button className="nav__link" onClick={logout}>Выйти</button>
-              </>
+              <button className="nav__icon avatar" onClick={logout} title={`${user.email} · выйти`} aria-label="Выйти">
+                {user.email.slice(0, 1).toUpperCase()}
+              </button>
             ) : (
-              <Link to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} className="nav__link">
-                Войти
+              <Link to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} className="nav__icon" title="Войти" aria-label="Войти">
+                <IconUser size={22} />
               </Link>
             )}
             <Link to="/sell" className="btn btn--primary btn--sm">Продать билет</Link>
@@ -70,7 +74,7 @@ export function Layout() {
                 exit={{ rotate: 90, opacity: 0, scale: 0.6 }}
                 transition={{ duration: 0.18 }}
               >
-                {dark ? '☀' : '☾'}
+                {dark ? <IconSun size={18} /> : <IconMoon size={18} />}
               </m.span>
             </AnimatePresence>
           </button>
@@ -87,6 +91,25 @@ export function Layout() {
             <strong>Hand2Hand</strong>
             <p className="muted small">Билеты от зрителей по номиналу.</p>
           </div>
+          <nav className="footer__menu" aria-label="Меню в подвале">
+            <div>
+              <b>Сервис</b>
+              <Link to="/how">Как это работает</Link>
+              <Link to="/sell">Продать билет</Link>
+              <Link to="/account">Мои билеты</Link>
+            </div>
+            <div>
+              <b>Партнёрам</b>
+              <a href="mailto:partners@example.test">Организаторам</a>
+              <a href="mailto:partners@example.test">Билетным операторам</a>
+            </div>
+            <div>
+              <b>Документы</b>
+              <span className="muted">Условия (скоро)</span>
+              <span className="muted">Конфиденциальность (скоро)</span>
+              <a href="mailto:support@example.test">Поддержка</a>
+            </div>
+          </nav>
           {USE_MOCK && (
             <div className="demo-note small">
               Демо: вход по любому email с кодом 1234, email со словом admin открывает админку.

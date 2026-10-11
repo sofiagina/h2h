@@ -80,7 +80,7 @@ export const httpApi: Api = {
   verifyCode: (email, code) => req<Session>('POST', '/auth/otp/verify', { body: { email, code } }),
   me: () => req('GET', '/users/me'),
 
-  listEvents: (f = {}) => req('GET', `/events${qs({ q: f.q, city: f.city, scope: f.scope })}`),
+  listEvents: (f = {}) => req('GET', `/events${qs({ q: f.q, city: f.city, group: f.group, scope: f.scope })}`),
   listCities: () => req('GET', '/events/cities'),
   getEvent: (id) => req('GET', `/events/${id}`),
   getOffers: (eventId) => req('GET', `/events/${eventId}/offers`),
@@ -105,6 +105,8 @@ export const httpApi: Api = {
   mySellRequests: () => req('GET', '/users/me/sell-requests'),
   joinWaitlist: (eventId) => req('POST', `/events/${eventId}/waitlist`),
   myWaitlist: () => req('GET', '/users/me/waitlist'),
+  setFavorite: (eventId, on) => req(on ? 'PUT' : 'DELETE', `/events/${eventId}/favorite`),
+  myFavorites: () => req('GET', '/users/me/favorites'),
 
   adminAggregators: () => req('GET', '/admin/aggregators'),
   adminSetMode: (id, mode, reason) => req('PATCH', `/admin/aggregators/${id}`, { body: { mode, reason } }),

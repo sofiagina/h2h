@@ -22,6 +22,8 @@ export type DisputeStatus = 'open' | 'refunded' | 'rejected';
 /** waiting — билет ещё не продан; scheduled — выплата по графику; frozen — заморожена спором. */
 export type PayoutStatus = 'waiting' | 'scheduled' | 'sent' | 'frozen' | 'cancelled';
 export type Role = 'customer' | 'admin';
+/** Раздел витрины: по нему плитки категорий на главной. */
+export type EventGroup = 'concerts' | 'festivals' | 'theatre' | 'standup' | 'classic' | 'kids' | 'sport' | 'club';
 export type DisputeAuthor = 'buyer' | 'seller' | 'support';
 
 export interface Venue {
@@ -35,6 +37,7 @@ export interface EventItem {
   title: string;
   artist: string;
   category: string;
+  group: EventGroup;
   description: string;
   startsAt: string;
   venue: Venue;
@@ -48,6 +51,8 @@ export interface EventItem {
   minFaceValue: Money | null;
   availableCount: number;
   waitlistCount: number;
+  /** В избранном у текущего пользователя (для гостя всегда false). */
+  isFavorite: boolean;
 }
 
 export type EventRef = Pick<EventItem, 'id' | 'title' | 'startsAt' | 'venue'>;
@@ -250,6 +255,7 @@ export interface Aggregator {
 export interface EventFilter {
   q?: string;
   city?: string;
+  group?: EventGroup;
   /**
    * catalog (по умолчанию) — витрина: без прошедших и без концертов без организатора, где нет билетов.
    * sell — поиск в форме продавца: все предстоящие, чтобы не заводить концерт дважды.
@@ -297,6 +303,8 @@ export interface Api {
   mySellRequests(): Promise<SellRequest[]>;
   joinWaitlist(eventId: string): Promise<WaitlistEntry>;
   myWaitlist(): Promise<WaitlistEntry[]>;
+  setFavorite(eventId: string, on: boolean): Promise<void>;
+  myFavorites(): Promise<EventItem[]>;
 
   adminAggregators(): Promise<Aggregator[]>;
   adminSetMode(id: string, mode: AggregatorMode, reason: string): Promise<Aggregator>;
