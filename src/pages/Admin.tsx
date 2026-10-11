@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
-import { api, type AdminDispute, type AdminSellRequest, type Aggregator, type AggregatorMode } from '../api';
+import { api, type AdminSellRequest, type Aggregator, type AggregatorMode } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { AggBadge, DisputeBadge, ErrorBox, OrderBadge, SellBadge, Spinner } from '../components/ui';
 import { dateLong, dateTime, money, seatLabel } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 
 const MODES: Record<AggregatorMode, string> = {
-  auto: 'Авто — по проверкам',
+  auto: 'Авто',
   force_on: 'Принудительно включено',
   force_off: 'Принудительно выключено',
 };
@@ -20,7 +20,7 @@ export function Admin() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') ?? 'kassa';
   const disputes = useAsync(() => (user?.role === 'admin' ? api.adminDisputes() : Promise.resolve([])), [user?.role, tab]);
-  const openDisputes = disputes.data?.filter((d) => d.escrow?.dispute?.status === 'open').length ?? 0;
+  const openDisputes = disputes.data?.filter((d) => d.dispute.status === 'open').length ?? 0;
 
   if (!ready) return <div className="container section"><Spinner /></div>;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
@@ -37,12 +37,12 @@ export function Admin() {
       <div className="section__head">
         <div>
           <h1 className="h2">Админка</h1>
-          <p className="muted">Кассы организаторов и заказы</p>
+          
         </div>
       </div>
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'kassa'} className={tab === 'kassa' ? 'active' : ''} onClick={() => setParams({})}>
-          Кассы и API
+          Организаторы и API
         </button>
         <button role="tab" aria-selected={tab === 'review'} className={tab === 'review' ? 'active' : ''} onClick={() => setParams({ tab: 'review' })}>
           Модерация
@@ -56,7 +56,7 @@ export function Admin() {
       </div>
       {tab === 'kassa' && <Aggregators />}
       {tab === 'review' && <Review />}
-      {tab === 'disputes' && <Disputes onChange={() => disputes.reload(true)} />}
+      {tab === 'disputes' && <Disputes />}
       {tab === 'orders' && <Orders />}
     </div>
   );
@@ -69,8 +69,7 @@ function Aggregators() {
   return (
     <>
       <p className="muted">
-        Health Monitor проверяет API каждой кассы по расписанию. В режиме «Авто» продажи открыты, только когда касса в статусе
-        «Работает»: три ошибки подряд — «Не отвечает», три успеха — обратно в работу.
+        В режиме «Авто» продажи закрываются после трёх неудачных проверок подряд и открываются после трёх успешных.
       </p>
       <div className="agg-grid">
         {list.data.map((a) => (
@@ -145,7 +144,7 @@ function AggregatorCard({ initial }: { initial: Aggregator }) {
       {mode !== a.mode && (
         <label className="field">
           <span>Причина (попадёт в журнал)</span>
-          <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Например: касса подтвердила работу по телефону" />
+          <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Например: организатор подтвердил работу по телефону" />
         </label>
       )}
       {error && <ErrorBox error={error} />}
@@ -207,8 +206,7 @@ function Review() {
   return (
     <>
       <p className="muted">
-        Заявки на концерты, где организатор не подключён. Проверьте по ссылке, что концерт настоящий, а билет похож на действительный.
-        Каждая такая заявка — ещё и контакт организатора, которого стоит позвать в партнёры.
+        Концерты без организатора. Проверьте ссылку и билет.
       </p>
       {!pending.length && <p className="muted">Новых заявок нет.</p>}
       <div className="agg-grid">
@@ -231,7 +229,7 @@ function Review() {
                     <td>{s.event.title}</td>
                     <td>{seatLabel(s.seat)}</td>
                     <td>{money(s.faceValue)}</td>
-                    <td>{s.guarantee === 'organizer' ? 'Касса' : 'Удержание'}</td>
+                    <td>{s.guarantee === 'organizer' ? 'Перевыпуск' : 'Удержание'}</td>
                     <td><SellBadge status={s.status} /></td>
                   </tr>
                 ))}
@@ -281,7 +279,7 @@ function ReviewCard({ initial, onDone }: { initial: AdminSellRequest; onDone(): 
         <dd>{s.sourceUrl ? <a href={s.sourceUrl} target="_blank" rel="noreferrer noopener">{s.sourceUrl}</a> : '—'}</dd>
       </dl>
       <label className="field">
-        <span>Комментарий (для отказа — обязательно, его увидит продавец)</span>
+        <span>Комментарий продавцу</span>
         <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} />
       </label>
       {error && <ErrorBox error={error} />}
@@ -293,76 +291,44 @@ function ReviewCard({ initial, onDone }: { initial: AdminSellRequest; onDone(): 
   );
 }
 
-function Disputes({ onChange }: { onChange(): void }) {
+function Disputes() {
   const list = useAsync(() => api.adminDisputes(), []);
   if (list.error) return <ErrorBox error={list.error} onRetry={() => list.reload()} />;
   if (!list.data) return <Spinner />;
-  if (!list.data.length) return <p className="muted">Споров нет. Они появляются, когда покупатель билета без организатора сообщает о проблеме на входе.</p>;
+  if (!list.data.length) return <p className="muted">Споров нет.</p>;
   return (
     <>
       <p className="muted">
-        Пока спор открыт, деньги продавцу не уходят. Свяжитесь с обеими сторонами, при необходимости — с площадкой, и примите решение:
-        его комментарий увидят покупатель и продавец.
+        Переписка и решение на странице спора.
       </p>
-      <div className="agg-grid">
-        {list.data.map((d) => (
-          <DisputeCard key={d.id} initial={d} onDone={() => { list.reload(true); onChange(); }} />
-        ))}
-      </div>
+      <ul className="items">
+        {list.data.map((d) => {
+          const files = d.dispute.messages.reduce((n, m) => n + m.attachments.length, 0);
+          const last = d.dispute.messages.at(-1)!;
+          return (
+            <li key={d.id}>
+              <Link to={`/disputes/${d.id}`} className="item">
+                <div>
+                  <strong>{d.event.title}</strong>
+                  <span className="muted small">
+                    {seatLabel(d.offer.seat)} · {money(d.total)} · {d.offer.guarantee === 'organizer' ? 'перевыпуск' : 'без организатора'}
+                  </span>
+                  <span className="small">
+                    Покупатель: {d.buyer?.email ?? '—'} · Продавец: {d.sellerEmail ?? 'не указан (демо)'}
+                  </span>
+                  <span className="muted small">
+                    Сообщений: {d.dispute.messages.length}, файлов: {files} · последнее {dateTime(last.at)}
+                  </span>
+                </div>
+                <div className="item__right">
+                  <span className="muted small">с {dateLong(d.dispute.openedAt)}</span>
+                  <DisputeBadge status={d.dispute.status} />
+                </div>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     </>
-  );
-}
-
-function DisputeCard({ initial, onDone }: { initial: AdminDispute; onDone(): void }) {
-  const [comment, setComment] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const o = initial;
-  const d = o.escrow!.dispute!;
-
-  async function resolve(refund: boolean) {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.adminResolveDispute(o.id, refund, comment);
-      onDone();
-    } catch (e) {
-      setError(e as Error);
-      setBusy(false);
-    }
-  }
-
-  return (
-    <article className="panel agg">
-      <header className="agg__head">
-        <div>
-          <h3>{o.event.title}</h3>
-          <p className="muted small">{dateLong(o.event.startsAt)} · {seatLabel(o.offer.seat)}</p>
-        </div>
-        <DisputeBadge status={d.status} />
-      </header>
-      <blockquote className="quote">{d.message || '—'}</blockquote>
-      <dl className="kv small">
-        <dt>Открыт</dt><dd>{dateTime(d.openedAt)}</dd>
-        <dt>Покупатель</dt><dd>{o.buyer ? `${o.buyer.name}, ${o.buyer.email}${o.buyer.phone ? `, ${o.buyer.phone}` : ''}` : '—'}</dd>
-        <dt>Продавец</dt><dd>{o.sellerEmail ?? 'не указан (демо-данные)'}</dd>
-        <dt>Сумма</dt><dd>{money(o.total)}</dd>
-        <dt>Заказ</dt><dd><Link to={`/orders/${o.id}`}>{o.id}</Link></dd>
-        {d.resolution && (<><dt>Решение</dt><dd>{d.resolution}</dd></>)}
-      </dl>
-      {d.status === 'open' && (
-        <>
-          <label className="field">
-            <span>Решение (увидят покупатель и продавец)</span>
-            <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Например: площадка подтвердила, что билет уже был использован" />
-          </label>
-          {error && <ErrorBox error={error} />}
-          <div className="agg__actions">
-            <button className="btn btn--primary btn--sm" disabled={busy} onClick={() => resolve(true)}>Вернуть деньги покупателю</button>
-            <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => resolve(false)}>Отклонить спор</button>
-          </div>
-        </>
-      )}
-    </article>
   );
 }

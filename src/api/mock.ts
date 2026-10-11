@@ -2,11 +2,12 @@
 // Нужен, чтобы фронт жил до готовности Java-бэкенда. Вход: любой email, код 1234;
 // email со словом "admin" получает роль администратора.
 //
-// Два режима гарантии:
-//  - organizer: организатор подключён, касса аннулирует старый билет и выпускает новый;
-//  - escrow: организатора нет, билет передаёт продавец, деньги держим до конца концерта,
-//    мероприятие и заявку перед публикацией проверяет модератор.
+// Модель как у TicketSwap: покупатель платит нам, организатор перевыпускает билет,
+// продавец получает номинал от нас. Два режима гарантии:
+//  - organizer: организатор подключён, перевыпуск по API, дублей нет, выплата сразу;
+//  - escrow: организатора нет, билет передаёт продавец, выплата через сутки после начала концерта.
 
+import { toDemoUrl, validateFiles } from '../lib/files';
 import { tokenStore } from './token';
 import {
   ApiError,
@@ -15,33 +16,42 @@ import {
   type Aggregator,
   type AggregatorStatus,
   type Api,
+  type Attachment,
+  type DisputeAuthor,
+  type DisputeView,
   type EventItem,
   type EventRef,
   type Guarantee,
   type HealthCheck,
   type Offer,
   type Order,
+  type Payout,
+  type PayoutInput,
   type Seat,
   type SellRequest,
   type User,
 } from './types';
 
-const KEY = 'h2h.mock.v2';
+const KEY = 'h2h.mock.v3';
+const LEGACY_KEY = 'h2h.mock.v2';
 const RESERVE_MINUTES = 15;
 const MOCK_CODE = '1234';
 const ISSUE_AFTER_MS = 2500;
 const LIST_AFTER_MS = 3000;
-/** Деньги продавцу без гарантии организатора уходят через сутки после начала концерта. */
-const ESCROW_HOLD_MS = 24 * 3600_000;
+const DAY = 24 * 3600_000;
 
 type EventRow = Omit<EventItem, 'salesEnabled' | 'minFaceValue' | 'availableCount' | 'waitlistCount'> & {
-  /** Новое мероприятие от продавца скрыто, пока модератор его не проверил. */
+  /** Концерт от продавца скрыт, пока модератор его не проверил. */
   published: boolean;
 };
 type OfferRow = Offer & { state: 'available' | 'reserved' | 'sold' };
-type OrderRow = Order & { userId: string; paidAt?: string };
-/** orderId — заказ, в котором билет продан: по нему продавец видит спор покупателя. */
-type SellRow = AdminSellRequest & { userId: string; orderId?: string };
+type OrderRow = Order & { userId: string; paidAt?: string; issuedAt?: string };
+type SellRow = Omit<AdminSellRequest, 'payout' | 'disputeOrderId' | 'disputeStatus'> & {
+  userId: string;
+  /** Заказ, в котором билет продан: по нему продавец попадает в спор. */
+  orderId?: string;
+  payout: Pick<Payout, 'method' | 'details'>;
+};
 interface WaitRow {
   id: string;
   userId: string;
@@ -70,6 +80,7 @@ interface DB {
 const delay = (ms = 250) => new Promise((r) => setTimeout(r, ms));
 const id = (p: string) => `${p}_${Math.random().toString(36).slice(2, 10)}`;
 const iso = (d: Date) => d.toISOString();
+const now = () => iso(new Date());
 const daysFromNow = (days: number, hour: number) => {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -77,14 +88,37 @@ const daysFromNow = (days: number, hour: number) => {
   return iso(d);
 };
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
+const after = (isoDate: string, ms: number) => iso(new Date(Date.parse(isoDate) + ms));
+
+function maskPhone(phone: string) {
+  const d = phone.replace(/\D/g, '');
+  return `+7 ••• •••-${d.slice(-4, -2)}-${d.slice(-2)}`;
+}
+
+/** Проверка реквизитов и маскированная строка для показа. Полные реквизиты в демо не храним. */
+function describePayout(p: PayoutInput): string {
+  if (p.method === 'sbp') {
+    if (p.phone.replace(/\D/g, '').length < 11) throw new ApiError('INVALID', 'Укажите телефон, привязанный к СБП');
+    if (!p.bank.trim()) throw new ApiError('INVALID', 'Выберите банк для перевода');
+    return `${maskPhone(p.phone)}, ${p.bank.trim()}`;
+  }
+  if (p.method === 'card') {
+    if (!p.cardToken || !/^\d{4}$/.test(p.cardLast4)) throw new ApiError('INVALID', 'Проверьте номер карты');
+    return `карта •••• ${p.cardLast4}`;
+  }
+  if (!/\p{L}{2,}.*\s+\p{L}{2,}/u.test(p.holder)) throw new ApiError('INVALID', 'Укажите ФИО получателя, как в банке');
+  if (!/^\d{9}$/.test(p.bik)) throw new ApiError('INVALID', 'БИК из 9 цифр');
+  if (!/^\d{20}$/.test(p.account)) throw new ApiError('INVALID', 'Номер счёта из 20 цифр');
+  return `счёт •••• ${p.account.slice(-4)}, БИК ${p.bik}`;
+}
 
 function history(status: AggregatorStatus): HealthCheck[] {
-  const now = Date.now();
+  const t = Date.now();
   return Array.from({ length: 24 }, (_, i) => {
     const failing = status === 'DOWN' && i >= 20;
     const slow = status === 'DEGRADED' && i >= 18;
     return {
-      at: iso(new Date(now - (23 - i) * 5 * 60_000)),
+      at: iso(new Date(t - (23 - i) * 5 * 60_000)),
       ok: !failing,
       latencyMs: failing ? null : slow ? 1800 + i * 20 : 180 + ((i * 37) % 120),
       code: failing ? 503 : 200,
@@ -96,11 +130,15 @@ function offer(eventId: string, seat: Seat, rub: number, guarantee: Guarantee = 
   return { id: id('of'), eventId, seat, faceValue: rub * 100, fee: 0, currency: 'RUB', personalized, guarantee, state: 'available' };
 }
 
+function ref(e: EventRow): EventRef {
+  return { id: e.id, title: e.title, startsAt: e.startsAt, venue: e.venue };
+}
+
 function seed(): DB {
   const aggregators: Aggregator[] = [
-    { id: 'agg_volga', name: 'ВолгаТикет', kind: 'Касса организатора, REST API', status: 'UP', mode: 'auto', lastCheckAt: iso(new Date()), latencyMs: 210, eventsCount: 0, checks: history('UP') },
-    { id: 'agg_don', name: 'Дон-Билет', kind: 'Билетный оператор, REST API', status: 'DEGRADED', mode: 'force_on', lastCheckAt: iso(new Date()), latencyMs: 2240, eventsCount: 0, checks: history('DEGRADED') },
-    { id: 'agg_kuban', name: 'ЮгКасса', kind: 'Касса организатора, SOAP', status: 'DOWN', mode: 'auto', lastCheckAt: iso(new Date()), latencyMs: null, eventsCount: 0, checks: history('DOWN') },
+    { id: 'agg_volga', name: 'ВолгаТикет', kind: 'Билетная система организатора, REST API', status: 'UP', mode: 'auto', lastCheckAt: now(), latencyMs: 210, eventsCount: 0, checks: history('UP') },
+    { id: 'agg_don', name: 'Дон-Билет', kind: 'Билетный оператор, REST API', status: 'DEGRADED', mode: 'force_on', lastCheckAt: now(), latencyMs: 2240, eventsCount: 0, checks: history('DEGRADED') },
+    { id: 'agg_kuban', name: 'ЮгКасса', kind: 'Билетная система организатора, SOAP', status: 'DOWN', mode: 'auto', lastCheckAt: now(), latencyMs: null, eventsCount: 0, checks: history('DOWN') },
   ];
 
   const base = { status: 'sold_out' as const, organizerConnected: true, published: true };
@@ -127,7 +165,7 @@ function seed(): DB {
     },
     {
       ...base, id: 'ev_jazz', title: 'Джаз у реки', artist: 'Трио Алексея Лунина', category: 'Джаз', ageLimit: 0, aggregatorId: 'agg_don',
-      description: 'Вечер джазовых стандартов на набережной. Сейчас все билеты у зрителей — встаньте в лист ожидания.',
+      description: 'Вечер джазовых стандартов на набережной. Сейчас все билеты у зрителей — включите уведомления.',
       startsAt: daysFromNow(40, 20), venue: { name: 'Летний театр', city: 'Ростов-на-Дону', address: 'Береговая ул., 10' },
     },
     {
@@ -154,7 +192,6 @@ function seed(): DB {
     offer('ev_kvartirnik', { sector: 'Входной билет' }, 1500, 'escrow'),
     offer('ev_kvartirnik', { sector: 'Входной билет' }, 1500, 'escrow'),
   ];
-  // Длинный список на одном концерте — чтобы было видно, как выглядит много мест.
   for (const [row, places] of [['3', [7, 8, 14]], ['5', [1, 2, 21]], ['7', [12, 13]], ['11', [4, 5, 6]]] as const)
     for (const p of places) offers.push(offer('ev_wind', { sector: 'Партер', row, place: String(p) }, Number(row) < 6 ? 4500 : 3500));
   for (const p of [3, 9, 21, 22, 30]) offers.push(offer('ev_wind', { sector: 'Амфитеатр', row: String(1 + (p % 4)), place: String(p) }, 2500));
@@ -163,10 +200,9 @@ function seed(): DB {
 
   for (const a of aggregators) a.eventsCount = events.filter((e) => e.aggregatorId === a.id).length;
 
-  // Заявка на мероприятие, которого нет в каталоге, — ждёт модератора.
   const pendingEvent: EventRow = {
     id: 'ev_user_1', title: 'Хор «Волжские голоса». Юбилейный концерт', artist: 'Хор «Волжские голоса»', category: 'Другое',
-    description: 'Мероприятие добавлено продавцом. Организатор не подключён к Hand2Hand.', ageLimit: 0,
+    description: 'Концерт добавлен продавцом. Организатор не подключён к Hand2Hand.', ageLimit: 0,
     startsAt: daysFromNow(15, 18), venue: { name: 'ДК «Металлург»', city: 'Волгоград', address: '' },
     status: 'scheduled', aggregatorId: null, organizerConnected: false, published: false,
   };
@@ -181,21 +217,17 @@ function seed(): DB {
       {
         id: id('sr'), userId: 'seed', sellerEmail: 'seller@example.test', event: ref(pendingEvent), seat: { sector: 'Партер', row: '6', place: '10' },
         faceValue: 120000, orderNumber: 'DK-48211', status: 'review', guarantee: 'escrow', createdAt: iso(new Date(Date.now() - 3600_000)),
-        purchaseEmail: 'seller@example.test', boughtAt: 'Касса ДК', sourceUrl: 'https://example.test/afisha/hor-yubiley', ticketFileName: 'bilet.pdf', eventIsNew: true,
-        dispute: null,
+        purchaseEmail: 'seller@example.test', boughtAt: 'Касса ДК', sourceUrl: 'https://example.test/afisha/hor-yubiley', ticketFileName: 'bilet.pdf',
+        eventIsNew: true, payout: { method: 'sbp', details: '+7 ••• •••-45-12, Сбербанк' },
       },
     ],
     waitlist: [
-      { id: id('wl'), userId: 'seed', eventId: 'ev_jazz', createdAt: iso(new Date()) },
-      { id: id('wl'), userId: 'seed', eventId: 'ev_jazz', createdAt: iso(new Date()) },
+      { id: id('wl'), userId: 'seed', eventId: 'ev_jazz', createdAt: now() },
+      { id: id('wl'), userId: 'seed', eventId: 'ev_jazz', createdAt: now() },
     ],
     aggregators,
     audit: [],
   };
-}
-
-function ref(e: EventRow): EventRef {
-  return { id: e.id, title: e.title, startsAt: e.startsAt, venue: e.venue };
 }
 
 let db: DB = load();
@@ -203,33 +235,58 @@ let db: DB = load();
 function load(): DB {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return migrate(JSON.parse(raw) as DB);
+    if (raw) return normalize(JSON.parse(raw) as DB);
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) {
+      const migrated = migrateV2(JSON.parse(legacy));
+      localStorage.setItem(KEY, JSON.stringify(migrated));
+      localStorage.removeItem(LEGACY_KEY);
+      return migrated;
+    }
   } catch {
     /* нет доступа к хранилищу — работаем с чистыми данными */
   }
   return seed();
 }
 
-/** Данные, сохранённые прошлой версией мока: escrow.disputed → escrow.dispute. */
-function migrate(data: DB): DB {
-  for (const o of data.orders) {
-    const legacy = o.escrow as (Order['escrow'] & { disputed?: boolean }) | null;
-    if (!legacy || !('disputed' in legacy)) continue;
-    const log = data.audit.find((a) => a.action === 'dispute' && a.target === o.id);
-    legacy.dispute = legacy.disputed
-      ? { message: log?.reason ?? '', openedAt: log?.at ?? iso(new Date()), status: 'open', resolution: null, resolvedAt: null }
-      : null;
-    delete legacy.disputed;
+/** Заявки, сохранённые до появления карт и счетов: выплата была только по СБП. */
+function normalize(data: DB): DB {
+  for (const s of data.sell as (SellRow & { payout: { phoneMasked?: string; bank?: string } })[]) {
+    if (s.payout.phoneMasked !== undefined) s.payout = { method: 'sbp', details: `${s.payout.phoneMasked}, ${s.payout.bank ?? ''}` };
   }
-  for (const s of data.sell) s.dispute ??= null;
   return data;
 }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/** Данные прошлой версии мока: спор жил внутри escrow, у заявок не было реквизитов выплаты. */
+function migrateV2(old: any): DB {
+  for (const o of old.orders ?? []) {
+    const legacy = o.escrow?.dispute;
+    o.disputeUntil = after(o.event.startsAt, DAY);
+    o.escrow = o.escrow ? { releaseAt: o.escrow.releaseAt } : null;
+    o.dispute = legacy
+      ? {
+          status: legacy.status, openedAt: legacy.openedAt, resolution: legacy.resolution, resolvedAt: legacy.resolvedAt,
+          messages: [
+            { id: id('dm'), author: 'buyer', text: legacy.message, at: legacy.openedAt, attachments: [] },
+            ...(legacy.resolution ? [{ id: id('dm'), author: 'support', text: legacy.resolution, at: legacy.resolvedAt, attachments: [] }] : []),
+          ],
+        }
+      : null;
+  }
+  for (const s of old.sell ?? []) {
+    delete s.dispute;
+    s.payout ??= { method: 'sbp', details: 'не указан' };
+  }
+  return normalize(old as DB);
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 function save() {
   try {
     localStorage.setItem(KEY, JSON.stringify(db));
   } catch {
-    /* ignore */
+    throw new ApiError('STORAGE_FULL', 'В демо-режиме закончилось место в браузере. Сбросьте демо-данные в подвале сайта.', 507);
   }
 }
 
@@ -255,7 +312,7 @@ function requireAdmin(): User {
 const eventById = (eventId: string) => db.events.find((e) => e.id === eventId);
 const eventRef = (eventId: string) => ref(eventById(eventId)!);
 
-/** Без кассы организатора проверять нечего — продажи открыты, но с удержанием денег. */
+/** Без билетной системы организатора проверять нечего — продажи открыты, но с удержанием выплаты. */
 function salesEnabledFor(e: EventRow | undefined) {
   if (!e) return false;
   if (!e.aggregatorId) return true;
@@ -275,33 +332,46 @@ function decorate(e: EventRow): EventItem {
   };
 }
 
-const stripUser = <T extends { userId: string }>(row: T): Omit<T, 'userId'> => {
-  const { userId: _omit, ...rest } = row;
+function toOrder(o: OrderRow): Order {
+  const { userId: _u, paidAt: _p, issuedAt: _i, ...rest } = o;
   return rest;
-};
+}
 
 const stripOffer = (o: OfferRow): Offer => {
   const { state: _omit, ...rest } = o;
   return rest;
 };
 
-/** Продавцу не показываем служебные поля модерации. */
+const saleOfOrder = (orderId: string) => db.sell.find((s) => s.orderId === orderId);
+
+/** Статус выплаты продавцу считаем из заказа, в котором продан билет. */
+function payoutOf(s: SellRow): Payout {
+  const order = s.orderId ? db.orders.find((o) => o.id === s.orderId) : undefined;
+  const base = { ...s.payout };
+  if (!order || (order.status !== 'ISSUED' && order.status !== 'REFUNDED')) return { ...base, status: 'waiting', at: null };
+  if (order.dispute?.status === 'refunded') return { ...base, status: 'cancelled', at: null };
+  if (order.dispute?.status === 'open') return { ...base, status: 'frozen', at: null };
+  if (s.guarantee === 'organizer') return { ...base, status: 'sent', at: order.issuedAt ?? null };
+  const release = order.escrow!.releaseAt;
+  return { ...base, status: Date.now() > Date.parse(release) ? 'sent' : 'scheduled', at: release };
+}
+
 function toSellRequest(s: SellRow): SellRequest {
+  const order = s.orderId ? db.orders.find((o) => o.id === s.orderId) : undefined;
   return {
     id: s.id, event: s.event, seat: s.seat, faceValue: s.faceValue, orderNumber: s.orderNumber,
     status: s.status, guarantee: s.guarantee, rejectReason: s.rejectReason, createdAt: s.createdAt,
-    dispute: disputeOfSale(s),
+    payout: payoutOf(s),
+    disputeOrderId: order?.dispute ? order.id : null,
+    disputeStatus: order?.dispute?.status ?? null,
   };
 }
 
-function disputeOfSale(s: SellRow) {
-  if (!s.orderId) return null;
-  return db.orders.find((o) => o.id === s.orderId)?.escrow?.dispute?.status ?? null;
-}
-
-function toAdminDispute(o: OrderRow): AdminDispute {
-  const sale = db.sell.find((s) => s.orderId === o.id);
-  return { ...stripUser(o), sellerEmail: sale?.sellerEmail ?? null };
+function toAdminSell(s: SellRow): AdminSellRequest {
+  return {
+    ...toSellRequest(s), sellerEmail: s.sellerEmail, purchaseEmail: s.purchaseEmail, boughtAt: s.boughtAt,
+    sourceUrl: s.sourceUrl, ticketFileName: s.ticketFileName, eventIsNew: s.eventIsNew,
+  };
 }
 
 function listOffer(s: SellRow) {
@@ -309,37 +379,39 @@ function listOffer(s: SellRow) {
   db.offers.push(offer(s.event.id, s.seat, s.faceValue / 100, s.guarantee));
 }
 
+/** Организатор аннулировал билет продавца и выпустил новый на покупателя. */
 function issue(order: OrderRow) {
   order.status = 'ISSUED';
+  order.issuedAt = now();
   order.tickets = [{ id: id('tk'), barcode: String(Math.floor(1e11 + Math.random() * 9e11)), barcodeType: 'QR', pdfUrl: null }];
   const o = db.offers.find((x) => x.id === order.offer.id);
   if (o) o.state = 'sold';
-  const sale = db.sell.find((s) => s.event.id === order.event.id && s.status === 'listed' && s.faceValue === order.offer.faceValue);
+  const sale = db.sell.find((s) => s.event.id === order.event.id && s.status === 'listed' && s.faceValue === order.offer.faceValue && !s.orderId);
   if (sale) {
     sale.status = 'sold';
     sale.orderId = order.id;
   }
 }
 
-// То, что в бэкенде делают фоновые задачи: истечение резервов, выкуп у кассы
-// (старый билет аннулирован, новый выпущен на покупателя), подтверждение заявок продавцов.
+// То, что в бэкенде делают фоновые задачи: истечение броней, перевыпуск у организатора,
+// проверка билетов продавцов.
 function settle() {
-  const now = Date.now();
+  const t = Date.now();
   let changed = false;
   for (const o of db.orders) {
-    if (o.status === 'RESERVED' && o.expiresAt && Date.parse(o.expiresAt) < now) {
+    if (o.status === 'RESERVED' && o.expiresAt && Date.parse(o.expiresAt) < t) {
       o.status = 'EXPIRED';
       const of = db.offers.find((x) => x.id === o.offer.id);
       if (of?.state === 'reserved') of.state = 'available';
       changed = true;
     }
-    if (o.status === 'PAID' && o.paidAt && now - Date.parse(o.paidAt) > ISSUE_AFTER_MS) {
+    if (o.status === 'PAID' && o.paidAt && t - Date.parse(o.paidAt) > ISSUE_AFTER_MS) {
       issue(o);
       changed = true;
     }
   }
   for (const s of db.sell) {
-    if (s.status === 'pending' && now - Date.parse(s.createdAt) > LIST_AFTER_MS) {
+    if (s.status === 'pending' && t - Date.parse(s.createdAt) > LIST_AFTER_MS) {
       listOffer(s);
       changed = true;
     }
@@ -351,6 +423,32 @@ function recomputeStatus(a: Aggregator) {
   const last3 = a.checks.slice(-3);
   if (last3.length === 3 && last3.every((c) => !c.ok)) a.status = 'DOWN';
   else if (last3.length === 3 && last3.every((c) => c.ok)) a.status = (a.latencyMs ?? 0) > 1500 ? 'DEGRADED' : 'UP';
+}
+
+/** Кто смотрит спор: покупатель, продавец или поддержка. */
+function viewerOf(order: OrderRow, user: User): DisputeAuthor | null {
+  if (order.userId === user.id) return 'buyer';
+  if (saleOfOrder(order.id)?.userId === user.id) return 'seller';
+  if (user.role === 'admin') return 'support';
+  return null;
+}
+
+function disputeView(order: OrderRow, viewer: DisputeAuthor): DisputeView {
+  return { order: toOrder(order), dispute: order.dispute!, viewer, canWrite: order.dispute!.status === 'open' };
+}
+
+async function toAttachments(files: File[]): Promise<Attachment[]> {
+  const problem = validateFiles(files);
+  if (problem) throw new ApiError('INVALID_FILES', problem);
+  return Promise.all(files.map(async (f) => ({ id: id('att'), name: f.name, mime: f.type, size: f.size, url: await toDemoUrl(f) })));
+}
+
+function findOrderForDispute(orderId: string) {
+  const user = currentUser();
+  const order = db.orders.find((o) => o.id === orderId);
+  const viewer = order && viewerOf(order, user);
+  if (!order || !viewer) throw new ApiError('NOT_FOUND', 'Заказ не найден', 404);
+  return { order, viewer };
 }
 
 export const mockApi: Api = {
@@ -384,7 +482,7 @@ export const mockApi: Api = {
     return db.events
       .filter((e) => e.published)
       .filter((e) => !filter.city || e.venue.city === filter.city)
-      .filter((e) => !q || `${e.title} ${e.artist} ${e.venue.name}`.toLowerCase().includes(q))
+      .filter((e) => !q || `${e.title} ${e.artist} ${e.venue.name} ${e.venue.city}`.toLowerCase().includes(q))
       .filter((e) => Date.parse(e.startsAt) > Date.now())
       .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
       .map(decorate)
@@ -400,7 +498,7 @@ export const mockApi: Api = {
     await delay();
     settle();
     const e = eventById(eventId);
-    if (!e || !e.published) throw new ApiError('NOT_FOUND', 'Событие не найдено', 404);
+    if (!e || !e.published) throw new ApiError('NOT_FOUND', 'Концерт не найден', 404);
     return decorate(e);
   },
 
@@ -409,7 +507,7 @@ export const mockApi: Api = {
     settle();
     return db.offers
       .filter((o) => o.eventId === eventId && o.state === 'available')
-      .sort((a, b) => b.faceValue - a.faceValue)
+      .sort((a, b) => a.faceValue - b.faceValue)
       .map(stripOffer);
   },
 
@@ -420,17 +518,18 @@ export const mockApi: Api = {
     const of = db.offers.find((o) => o.id === offerId);
     if (!of || of.state !== 'available') throw new ApiError('SEAT_TAKEN', 'Этот билет только что забрали. Выберите другой.', 409);
     if (!salesEnabledFor(eventById(of.eventId)))
-      throw new ApiError('AGGREGATOR_UNAVAILABLE', 'Касса организатора сейчас не отвечает, поэтому продажи на этот концерт приостановлены. Деньги не списаны.', 503);
+      throw new ApiError('AGGREGATOR_UNAVAILABLE', 'Билетная система организатора сейчас не отвечает, поэтому продажи на паузе. Деньги не списаны.', 503);
     of.state = 'reserved';
-    const now = new Date();
+    const ev = eventById(of.eventId)!;
+    const created = new Date();
     const order: OrderRow = {
-      id: id('ord'), userId: user.id, status: 'RESERVED', event: eventRef(of.eventId), offer: stripOffer(of),
-      total: of.faceValue + of.fee, createdAt: iso(now), expiresAt: iso(new Date(now.getTime() + RESERVE_MINUTES * 60_000)),
-      buyer: null, tickets: [], escrow: null,
+      id: id('ord'), userId: user.id, status: 'RESERVED', event: ref(ev), offer: stripOffer(of),
+      total: of.faceValue + of.fee, createdAt: iso(created), expiresAt: iso(new Date(created.getTime() + RESERVE_MINUTES * 60_000)),
+      buyer: null, tickets: [], escrow: null, dispute: null, disputeUntil: after(ev.startsAt, DAY),
     };
     db.orders.unshift(order);
     save();
-    return stripUser(order);
+    return toOrder(order);
   },
 
   async payOrder(orderId, buyer) {
@@ -440,7 +539,7 @@ export const mockApi: Api = {
     const order = db.orders.find((o) => o.id === orderId && o.userId === user.id);
     if (!order) throw new ApiError('NOT_FOUND', 'Заказ не найден', 404);
     if (order.status === 'EXPIRED') throw new ApiError('RESERVATION_EXPIRED', 'Время брони вышло, билет вернулся в продажу.', 409);
-    if (order.status !== 'RESERVED') return { order: stripUser(order), paymentUrl: null };
+    if (order.status !== 'RESERVED') return { order: toOrder(order), paymentUrl: null };
     if (!buyer.name.trim() || !EMAIL_RE.test(buyer.email)) throw new ApiError('INVALID_BUYER', 'Заполните имя и email');
 
     order.buyer = buyer;
@@ -450,15 +549,14 @@ export const mockApi: Api = {
       const of = db.offers.find((x) => x.id === order.offer.id);
       if (of) of.state = 'available';
       save();
-      return { order: stripUser(order), paymentUrl: null };
+      return { order: toOrder(order), paymentUrl: null };
     }
     order.status = 'PAID';
     order.expiresAt = null;
-    order.paidAt = iso(new Date());
-    if (order.offer.guarantee === 'escrow')
-      order.escrow = { releaseAt: iso(new Date(Date.parse(order.event.startsAt) + ESCROW_HOLD_MS)), dispute: null };
+    order.paidAt = now();
+    if (order.offer.guarantee === 'escrow') order.escrow = { releaseAt: after(order.event.startsAt, DAY) };
     save();
-    return { order: stripUser(order), paymentUrl: null };
+    return { order: toOrder(order), paymentUrl: null };
   },
 
   async getOrder(orderId) {
@@ -467,28 +565,53 @@ export const mockApi: Api = {
     settle();
     const order = db.orders.find((o) => o.id === orderId && (o.userId === user.id || user.role === 'admin'));
     if (!order) throw new ApiError('NOT_FOUND', 'Заказ не найден', 404);
-    return stripUser(order);
+    return toOrder(order);
   },
 
   async myOrders() {
     await delay();
     const user = currentUser();
     settle();
-    return db.orders.filter((o) => o.userId === user.id).map(stripUser);
+    return db.orders.filter((o) => o.userId === user.id).map(toOrder);
   },
 
-  async openDispute(orderId, message) {
+  async openDispute(orderId, text, files) {
     await delay(500);
     const user = currentUser();
     const order = db.orders.find((o) => o.id === orderId && o.userId === user.id);
-    if (!order?.escrow) throw new ApiError('NOT_FOUND', 'Спор можно открыть только по билету без гарантии организатора', 404);
-    if (Date.now() > Date.parse(order.escrow.releaseAt)) throw new ApiError('TOO_LATE', 'Деньги уже переведены продавцу — напишите в поддержку');
-    if (order.escrow.dispute) throw new ApiError('INVALID', 'Спор по этому заказу уже открыт');
-    if (!message.trim()) throw new ApiError('INVALID', 'Опишите, что случилось');
-    order.escrow.dispute = { message: message.trim(), openedAt: iso(new Date()), status: 'open', resolution: null, resolvedAt: null };
-    db.audit.push({ at: iso(new Date()), userId: user.id, action: 'dispute', target: orderId, reason: message });
+    if (!order) throw new ApiError('NOT_FOUND', 'Заказ не найден', 404);
+    if (order.status !== 'ISSUED') throw new ApiError('INVALID', 'Спор можно открыть только по выданному билету');
+    if (order.dispute) throw new ApiError('INVALID', 'Спор по этому заказу уже открыт');
+    if (Date.now() > Date.parse(order.disputeUntil)) throw new ApiError('TOO_LATE', 'Срок для спора истёк');
+    if (text.trim().length < 10) throw new ApiError('INVALID', 'Опишите, что случилось');
+    const attachments = await toAttachments(files);
+    const at = now();
+    order.dispute = {
+      status: 'open', openedAt: at, resolution: null, resolvedAt: null,
+      messages: [{ id: id('dm'), author: 'buyer', text: text.trim(), at, attachments }],
+    };
+    db.audit.push({ at, userId: user.id, action: 'dispute:open', target: orderId, reason: text });
     save();
-    return stripUser(order);
+    return disputeView(order, 'buyer');
+  },
+
+  async getDispute(orderId) {
+    await delay(200);
+    const { order, viewer } = findOrderForDispute(orderId);
+    if (!order.dispute) throw new ApiError('NOT_FOUND', 'Спора по этому заказу нет', 404);
+    return disputeView(order, viewer);
+  },
+
+  async addDisputeMessage(orderId, text, files) {
+    await delay(400);
+    const { order, viewer } = findOrderForDispute(orderId);
+    if (!order.dispute) throw new ApiError('NOT_FOUND', 'Спора по этому заказу нет', 404);
+    if (order.dispute.status !== 'open') throw new ApiError('INVALID', 'Спор уже закрыт');
+    if (!text.trim() && !files.length) throw new ApiError('INVALID', 'Напишите сообщение или приложите файл');
+    const attachments = await toAttachments(files);
+    order.dispute.messages.push({ id: id('dm'), author: viewer, text: text.trim(), at: now(), attachments });
+    save();
+    return disputeView(order, viewer);
   },
 
   async createSellRequest(input) {
@@ -497,7 +620,8 @@ export const mockApi: Api = {
     if (!input.orderNumber.trim()) throw new ApiError('INVALID', 'Укажите номер заказа из письма с билетом');
     if (!EMAIL_RE.test(input.purchaseEmail)) throw new ApiError('INVALID', 'Укажите email, на который покупали билет');
     if (!input.seat.sector.trim()) throw new ApiError('INVALID', 'Укажите сектор или тип билета');
-    if (!(input.faceValue >= 10000)) throw new ApiError('INVALID', 'Номинал — от 100 ₽, как напечатано на билете');
+    if (!(input.faceValue >= 10000)) throw new ApiError('INVALID', 'Номинал от 100 ₽');
+    const payoutDetails = describePayout(input.payout);
 
     let event: EventRow | undefined;
     let eventIsNew = false;
@@ -506,12 +630,12 @@ export const mockApi: Api = {
       if (!n.title.trim() || !n.city.trim() || !n.venue.trim() || !n.startsAt) throw new ApiError('INVALID', 'Заполните название, город, площадку и дату');
       const hasLetters = (v: string) => /\p{L}{2,}/u.test(v);
       if (!hasLetters(n.title) || !hasLetters(n.city) || !hasLetters(n.venue)) throw new ApiError('INVALID', 'Название, город и площадку напишите словами, как в афише');
-      if (Date.parse(n.startsAt) < Date.now()) throw new ApiError('INVALID', 'Мероприятие уже прошло');
-      if (!/^https?:\/\/\S+\.\S+/.test(n.sourceUrl)) throw new ApiError('INVALID', 'Нужна ссылка на страницу мероприятия — по ней мы проверим, что оно настоящее');
-      if (!input.ticketFileName) throw new ApiError('INVALID', 'Приложите файл билета — без организатора мы проверяем его вручную');
+      if (Date.parse(n.startsAt) < Date.now()) throw new ApiError('INVALID', 'Концерт уже прошёл');
+      if (!/^https?:\/\/\S+\.\S+/.test(n.sourceUrl)) throw new ApiError('INVALID', 'Добавьте ссылку на страницу концерта');
+      if (!input.ticketFile) throw new ApiError('INVALID', 'Приложите файл билета');
       event = {
         id: id('ev'), title: n.title.trim(), artist: n.title.trim(), category: 'Другое', ageLimit: 0, status: 'scheduled',
-        description: 'Мероприятие добавлено продавцом. Организатор не подключён к Hand2Hand.',
+        description: 'Концерт добавлен продавцом. Организатор не подключён к Hand2Hand.',
         startsAt: n.startsAt, venue: { name: n.venue.trim(), city: n.city.trim(), address: '' },
         aggregatorId: null, organizerConnected: false, published: false,
       };
@@ -520,18 +644,18 @@ export const mockApi: Api = {
     } else {
       event = input.eventId ? eventById(input.eventId) : undefined;
       if (!event || !event.published) throw new ApiError('NOT_FOUND', 'Выберите концерт из списка или добавьте свой');
-      if (!event.organizerConnected && !input.ticketFileName) throw new ApiError('INVALID', 'Приложите файл билета — без организатора мы проверяем его вручную');
+      if (!event.organizerConnected && !input.ticketFile) throw new ApiError('INVALID', 'Приложите файл билета');
     }
 
     const row: SellRow = {
       id: id('sr'), userId: user.id, sellerEmail: user.email, event: ref(event), seat: input.seat, faceValue: input.faceValue,
       orderNumber: input.orderNumber.trim(), purchaseEmail: input.purchaseEmail.trim(), boughtAt: input.boughtAt.trim(),
-      sourceUrl: input.newEvent?.sourceUrl ?? null, ticketFileName: input.ticketFileName ?? null, eventIsNew,
+      sourceUrl: input.newEvent?.sourceUrl ?? null, ticketFileName: input.ticketFile?.name ?? null, eventIsNew,
       guarantee: event.organizerConnected ? 'organizer' : 'escrow',
-      // С организатором билет подтверждает касса автоматически, без него — модератор.
+      // С организатором билет проверяет его система по API, без него — модератор.
       status: event.organizerConnected ? 'pending' : 'review',
-      dispute: null,
-      createdAt: iso(new Date()),
+      payout: { method: input.payout.method, details: payoutDetails },
+      createdAt: now(),
     };
     db.sell.unshift(row);
     save();
@@ -550,7 +674,7 @@ export const mockApi: Api = {
     const user = currentUser();
     let row = db.waitlist.find((w) => w.eventId === eventId && w.userId === user.id);
     if (!row) {
-      row = { id: id('wl'), userId: user.id, eventId, createdAt: iso(new Date()) };
+      row = { id: id('wl'), userId: user.id, eventId, createdAt: now() };
       db.waitlist.push(row);
       save();
     }
@@ -580,11 +704,11 @@ export const mockApi: Api = {
   async adminSetMode(aggId, mode, reason) {
     await delay(400);
     const admin = requireAdmin();
-    if (!reason.trim()) throw new ApiError('INVALID', 'Укажите причину — она попадёт в журнал действий');
+    if (!reason.trim()) throw new ApiError('INVALID', 'Укажите причину');
     const a = db.aggregators.find((x) => x.id === aggId);
-    if (!a) throw new ApiError('NOT_FOUND', 'Касса не найдена', 404);
+    if (!a) throw new ApiError('NOT_FOUND', 'Билетная система не найдена', 404);
     a.mode = mode;
-    db.audit.push({ at: iso(new Date()), userId: admin.id, action: `mode:${mode}`, target: aggId, reason });
+    db.audit.push({ at: now(), userId: admin.id, action: `mode:${mode}`, target: aggId, reason });
     save();
     return a;
   },
@@ -593,12 +717,12 @@ export const mockApi: Api = {
     await delay(800);
     requireAdmin();
     const a = db.aggregators.find((x) => x.id === aggId);
-    if (!a) throw new ApiError('NOT_FOUND', 'Касса не найдена', 404);
+    if (!a) throw new ApiError('NOT_FOUND', 'Билетная система не найдена', 404);
     const failChance = a.status === 'DOWN' ? 0.7 : 0.1;
     const ok = Math.random() > failChance;
     const latency = ok ? Math.round(a.status === 'DEGRADED' ? 1200 + Math.random() * 1200 : 150 + Math.random() * 250) : null;
-    a.checks = [...a.checks.slice(-23), { at: iso(new Date()), ok, latencyMs: latency, code: ok ? 200 : 503 }];
-    a.lastCheckAt = iso(new Date());
+    a.checks = [...a.checks.slice(-23), { at: now(), ok, latencyMs: latency, code: ok ? 200 : 503 }];
+    a.lastCheckAt = now();
     a.latencyMs = latency;
     recomputeStatus(a);
     save();
@@ -609,14 +733,14 @@ export const mockApi: Api = {
     await delay();
     requireAdmin();
     settle();
-    return db.orders.map(stripUser);
+    return db.orders.map(toOrder);
   },
 
   async adminSellRequests() {
     await delay();
     requireAdmin();
     settle();
-    return db.sell.map(stripUser);
+    return db.sell.map(toAdminSell);
   },
 
   async adminReviewSell(sellId, approve, comment) {
@@ -634,36 +758,37 @@ export const mockApi: Api = {
       s.status = 'rejected';
       s.rejectReason = comment.trim();
     }
-    db.audit.push({ at: iso(new Date()), userId: admin.id, action: approve ? 'sell:approve' : 'sell:reject', target: sellId, reason: comment });
+    db.audit.push({ at: now(), userId: admin.id, action: approve ? 'sell:approve' : 'sell:reject', target: sellId, reason: comment });
     save();
-    return stripUser(s);
+    return toAdminSell(s);
   },
 
-  // Споры покупателей по билетам без организатора (в бэкенде — отдельный контроллер поддержки).
   async adminDisputes() {
     await delay();
     requireAdmin();
     const rank = { open: 0, refunded: 1, rejected: 1 } as const;
     return db.orders
-      .filter((o) => o.escrow?.dispute)
-      .sort((a, b) => rank[a.escrow!.dispute!.status] - rank[b.escrow!.dispute!.status] || b.escrow!.dispute!.openedAt.localeCompare(a.escrow!.dispute!.openedAt))
-      .map(toAdminDispute);
+      .filter((o) => o.dispute)
+      .sort((a, b) => rank[a.dispute!.status] - rank[b.dispute!.status] || b.dispute!.openedAt.localeCompare(a.dispute!.openedAt))
+      .map((o): AdminDispute => ({ ...toOrder(o), dispute: o.dispute!, sellerEmail: saleOfOrder(o.id)?.sellerEmail ?? null }));
   },
 
   async adminResolveDispute(orderId, refund, comment) {
     await delay(400);
     const admin = requireAdmin();
     const order = db.orders.find((o) => o.id === orderId);
-    const dispute = order?.escrow?.dispute;
+    const dispute = order?.dispute;
     if (!order || !dispute) throw new ApiError('NOT_FOUND', 'Спор не найден', 404);
     if (dispute.status !== 'open') throw new ApiError('INVALID', 'Спор уже решён');
-    if (!comment.trim()) throw new ApiError('INVALID', 'Напишите решение — его увидят покупатель и продавец');
+    if (!comment.trim()) throw new ApiError('INVALID', 'Напишите решение');
+    const at = now();
     dispute.status = refund ? 'refunded' : 'rejected';
     dispute.resolution = comment.trim();
-    dispute.resolvedAt = iso(new Date());
+    dispute.resolvedAt = at;
+    dispute.messages.push({ id: id('dm'), author: 'support', text: comment.trim(), at, attachments: [] });
     if (refund) order.status = 'REFUNDED';
-    db.audit.push({ at: iso(new Date()), userId: admin.id, action: refund ? 'dispute:refund' : 'dispute:reject', target: orderId, reason: comment });
+    db.audit.push({ at, userId: admin.id, action: refund ? 'dispute:refund' : 'dispute:reject', target: orderId, reason: comment });
     save();
-    return toAdminDispute(order);
+    return disputeView(order, 'support');
   },
 };

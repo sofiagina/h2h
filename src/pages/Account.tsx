@@ -1,14 +1,14 @@
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../auth/AuthContext';
-import { DisputeBadge, Empty, ErrorBox, OrderBadge, SellBadge, Spinner } from '../components/ui';
-import { dateLong, money, seatLabel } from '../lib/format';
+import { DisputeBadge, Empty, ErrorBox, OrderBadge, PayoutBadge, SellBadge, Spinner } from '../components/ui';
+import { dateLong, dateTime, money, seatLabel } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 
 const TABS = [
-  ['tickets', 'Мои билеты'],
-  ['sell', 'Сданные билеты'],
-  ['waitlist', 'Лист ожидания'],
+  ['tickets', 'Купленные'],
+  ['sell', 'Мои продажи'],
+  ['waitlist', 'Уведомления'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -25,9 +25,10 @@ export function Account() {
     <div className="container section">
       <div className="section__head">
         <div>
-          <h1 className="h2">Личный кабинет</h1>
+          <h1 className="h2">Мои билеты</h1>
           <p className="muted">{user.email}</p>
         </div>
+        <Link to="/sell" className="btn btn--primary btn--sm">Продать билет</Link>
       </div>
       <div className="tabs" role="tablist">
         {TABS.map(([key, label]) => (
@@ -54,17 +55,17 @@ function Tickets() {
       </Empty>
     );
   return (
-    <ul className="list">
+    <ul className="items">
       {orders.data.map((o) => (
         <li key={o.id}>
-          <Link to={o.status === 'RESERVED' ? `/checkout/${o.id}` : `/orders/${o.id}`} className="list__item">
+          <Link to={o.dispute ? `/disputes/${o.id}` : o.status === 'RESERVED' ? `/checkout/${o.id}` : `/orders/${o.id}`} className="item">
             <div>
               <strong>{o.event.title}</strong>
               <span className="muted small">{dateLong(o.event.startsAt)} · {seatLabel(o.offer.seat)}</span>
             </div>
-            <div className="list__right">
+            <div className="item__right">
               <span className="price">{money(o.total)}</span>
-              {o.escrow?.dispute ? <DisputeBadge status={o.escrow.dispute.status} /> : <OrderBadge status={o.status} />}
+              {o.dispute ? <DisputeBadge status={o.dispute.status} /> : <OrderBadge status={o.status} />}
             </div>
           </Link>
         </li>
@@ -79,26 +80,43 @@ function SellList() {
   if (!items.data) return <Spinner />;
   if (!items.data.length)
     return (
-      <Empty title="Вы ещё не сдавали билеты">
-        <Link to="/sell" className="btn btn--primary">Сдать билет</Link>
+      <Empty title="Вы ещё ничего не продавали">
+        <Link to="/sell" className="btn btn--primary">Продать билет</Link>
       </Empty>
     );
   return (
-    <ul className="list">
+    <ul className="items">
       {items.data.map((s) => (
-        <li key={s.id} className="list__item">
-          <div>
-            <strong>{s.event.title}</strong>
-            <span className="muted small">{seatLabel(s.seat)} · заказ {s.orderNumber}</span>
-            {s.rejectReason && <span className="small bad-text">Причина отказа: {s.rejectReason}</span>}
-            {s.dispute === 'open' && <span className="small bad-text">Покупатель открыл спор — выплата заморожена, поддержка свяжется с вами</span>}
-            {s.dispute === 'refunded' && <span className="small bad-text">Спор решён в пользу покупателя — выплаты не будет</span>}
-            {s.dispute === 'rejected' && <span className="small muted">Спор покупателя отклонён — выплата по графику</span>}
+        <li key={s.id} className="item item--col">
+          <div className="item__top">
+            <div>
+              <strong>{s.event.title}</strong>
+              <span className="muted small">{seatLabel(s.seat)} · заказ {s.orderNumber}</span>
+            </div>
+            <div className="item__right">
+              <span className="price">{money(s.faceValue)}</span>
+              <SellBadge status={s.status} />
+            </div>
           </div>
-          <div className="list__right">
-            <span className="price">{money(s.faceValue)}</span>
-            <SellBadge status={s.status} />
-          </div>
+          {s.status !== 'rejected' && (
+            <div className="payout-line small">
+              <PayoutBadge status={s.payout.status} />
+              <span className="muted">
+                {{ sbp: 'СБП', card: 'Карта', account: 'Счёт' }[s.payout.method]}: {s.payout.details}
+                {s.payout.at && ` · ${s.payout.status === 'sent' ? 'отправлено' : 'план'} ${dateTime(s.payout.at)}`}
+              </span>
+            </div>
+          )}
+          {s.rejectReason && <p className="small bad-text">Причина отказа: {s.rejectReason}</p>}
+          {s.disputeOrderId && (
+            <Link to={`/disputes/${s.disputeOrderId}`} className="dispute-link dispute-link--sm">
+              <span>
+                <b>{s.disputeStatus === 'open' ? 'Покупатель открыл спор' : 'Спор по билету закрыт'}</b>
+                <span className="muted small">{s.disputeStatus === 'open' ? 'Ответьте и приложите материалы' : 'Посмотреть решение'}</span>
+              </span>
+              <span>→</span>
+            </Link>
+          )}
         </li>
       ))}
     </ul>
@@ -111,20 +129,20 @@ function Waitlist() {
   if (!items.data) return <Spinner />;
   if (!items.data.length)
     return (
-      <Empty title="Лист ожидания пуст">
-        <p className="muted">Если на концерт нет свободных билетов, встаньте в очередь на его странице.</p>
+      <Empty title="Уведомлений нет">
+        <p className="muted">Нажмите «Уведомить меня» на странице концерта.</p>
       </Empty>
     );
   return (
-    <ul className="list">
+    <ul className="items">
       {items.data.map((w) => (
         <li key={w.id}>
-          <Link to={`/events/${w.event.id}`} className="list__item">
+          <Link to={`/events/${w.event.id}`} className="item">
             <div>
               <strong>{w.event.title}</strong>
               <span className="muted small">{dateLong(w.event.startsAt)} · {w.event.venue.city}</span>
             </div>
-            <span className="badge badge--info">Позиция {w.position}</span>
+            <span className="badge badge--info">В очереди: {w.position}</span>
           </Link>
         </li>
       ))}

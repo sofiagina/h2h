@@ -45,7 +45,7 @@ export function Checkout() {
           {o.status === 'EXPIRED' ? (
             <>
               <h2>Время брони вышло</h2>
-              <p className="muted">Билет вернулся в продажу. Если он ещё свободен — забронируйте снова.</p>
+              <p className="muted">Билет вернулся в продажу.</p>
               <Link className="btn btn--primary" to={`/events/${o.event.id}`}>К концерту</Link>
             </>
           ) : (
@@ -71,7 +71,7 @@ export function Checkout() {
         <h1 className="h2">Данные для билета</h1>
         <p className="muted">
           {o.offer.personalized
-            ? 'Билет именной: касса выпустит его на это имя, на входе могут попросить документ.'
+            ? 'Билет именной: на входе могут попросить документ.'
             : 'Билет придёт на этот email.'}
         </p>
         <label className="field">
@@ -91,7 +91,7 @@ export function Checkout() {
           {busy ? 'Переходим к оплате…' : `Оплатить ${money(o.total)}`}
         </button>
         <p className="muted small center">
-          Оплата проходит на защищённой странице банка. Если касса организатора не выпустит билет, деньги вернутся автоматически.
+          Деньги спишутся, когда организатор оформит билет на вас.
         </p>
       </form>
 

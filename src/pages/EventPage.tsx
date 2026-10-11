@@ -1,11 +1,30 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, type Offer } from '../api';
 import { useAuth } from '../auth/AuthContext';
-import { OfferPicker } from '../components/OfferPicker';
-import { Empty, ErrorBox, Spinner } from '../components/ui';
+import { ErrorBox, GuaranteeNote, Spinner } from '../components/ui';
 import { cover, dateLong, money, plural } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
+
+/** Строка списка: одно место или несколько одинаковых билетов без места (танцпол). */
+interface Line {
+  key: string;
+  offers: Offer[];
+}
+
+const seatText = (o: Offer) =>
+  o.seat.row || o.seat.place ? [o.seat.row && `ряд ${o.seat.row}`, o.seat.place && `место ${o.seat.place}`].filter(Boolean).join(', ') : 'без места';
+
+function group(offers: Offer[]): Line[] {
+  const lines: Line[] = [];
+  for (const o of offers) {
+    const same = !o.seat.row && !o.seat.place &&
+      lines.find((l) => { const f = l.offers[0]; return f.seat.sector === o.seat.sector && !f.seat.row && !f.seat.place && f.faceValue === o.faceValue; });
+    if (same) same.offers.push(o);
+    else lines.push({ key: o.id, offers: [o] });
+  }
+  return lines;
+}
 
 export function EventPage() {
   const { id = '' } = useParams();
@@ -13,133 +32,132 @@ export function EventPage() {
   const navigate = useNavigate();
   const event = useAsync(() => api.getEvent(id), [id]);
   const offers = useAsync(() => api.getOffers(id), [id]);
-  const [selected, setSelected] = useState<Offer | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [sector, setSector] = useState('');
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [waitPos, setWaitPos] = useState<number | null>(null);
 
+  const list = offers.data ?? [];
+  const sectors = useMemo(() => [...new Set(list.map((o) => o.seat.sector))], [list]);
+  const lines = useMemo(() => group(list.filter((o) => !sector || o.seat.sector === sector)), [list, sector]);
+
   const requireLogin = () => navigate(`/login?next=${encodeURIComponent(`/events/${id}`)}`);
 
-  async function buy() {
-    if (!selected) return;
+  async function buy(o: Offer) {
     if (!user) return requireLogin();
-    setBusy(true);
+    setBusyId(o.id);
     setError(null);
     try {
-      const order = await api.createOrder(selected.id);
+      const order = await api.createOrder(o.id);
       navigate(`/checkout/${order.id}`);
     } catch (e) {
       setError(e as Error);
-      if (e instanceof ApiError && e.code === 'SEAT_TAKEN') {
-        setSelected(null);
-        offers.reload(true);
-      }
+      if (e instanceof ApiError && e.code === 'SEAT_TAKEN') offers.reload(true);
       if (e instanceof ApiError && e.code === 'AGGREGATOR_UNAVAILABLE') event.reload(true);
     } finally {
-      setBusy(false);
+      setBusyId(null);
     }
   }
 
-  async function joinWaitlist() {
+  async function notifyMe() {
     if (!user) return requireLogin();
-    setBusy(true);
     try {
-      const entry = await api.joinWaitlist(id);
-      setWaitPos(entry.position);
+      setWaitPos((await api.joinWaitlist(id)).position);
     } catch (e) {
       setError(e as Error);
-    } finally {
-      setBusy(false);
     }
   }
 
   if (event.error) return <div className="container section"><ErrorBox error={event.error} onRetry={() => event.reload()} /></div>;
   if (!event.data) return <div className="container section"><Spinner /></div>;
   const ev = event.data;
-  const list = offers.data ?? [];
 
   return (
-    <>
-      <section className="event-hero" style={cover(ev.id)}>
-        <div className="container event-hero__inner">
-          <Link to="/" className="back">← Все концерты</Link>
-          <span className="tag tag--glass">{ev.category} · {ev.ageLimit}+</span>
-          <h1>{ev.title}</h1>
-          <p className="event-hero__meta">
-            {dateLong(ev.startsAt)} · {ev.venue.name}, {ev.venue.city}
-          </p>
-        </div>
-      </section>
-
-      <section className="container section event-layout">
+    <div className="container section event-page">
+      <Link to="/" className="back-link">← Все концерты</Link>
+      <header className="event-head">
+        <div className="event-head__cover" style={cover(ev.id)} aria-hidden />
         <div>
-          <h2>О концерте</h2>
-          <p className="lead">{ev.description}</p>
-          <dl className="facts">
-            <div><dt>Артист</dt><dd>{ev.artist}</dd></div>
-            <div><dt>Площадка</dt><dd>{ev.venue.name}</dd></div>
-            <div><dt>Адрес</dt><dd>{ev.venue.city}, {ev.venue.address}</dd></div>
-            <div><dt>В листе ожидания</dt><dd>{ev.waitlistCount} {plural(ev.waitlistCount, 'человек', 'человека', 'человек')}</dd></div>
-          </dl>
-          {ev.organizerConnected ? (
-            <div className="note">
-              <strong>Как это работает.</strong> Вы платите ровно номинал — сбор сервиса в пилоте 0 ₽. После оплаты касса организатора
-              аннулирует билет прежнего владельца и выпускает новый на ваше имя.
-            </div>
-          ) : (
-            <EscrowNote />
-          )}
+          <span className="muted small">{ev.category} · {ev.ageLimit}+</span>
+          <h1>{ev.title}</h1>
+          <p className="event-head__meta">{dateLong(ev.startsAt)}</p>
+          <p className="muted">{ev.venue.name}, {ev.venue.city}{ev.venue.address && `, ${ev.venue.address}`}</p>
         </div>
+      </header>
 
-        <aside className="panel">
-          <h2>Билеты по номиналу</h2>
-          {!ev.organizerConnected && <div className="alert alert--warn">Организатор не подключён — билет передаёт продавец. Деньги держим до конца концерта.</div>}
+      <div className="event-layout">
+        <section>
+          <div className="tickets-head">
+            <h2>
+              {list.length ? `${list.length} ${plural(list.length, 'билет', 'билета', 'билетов')} по номиналу` : 'Сейчас билетов нет'}
+            </h2>
+            {sectors.length > 1 && (
+              <div className="chips">
+                <button className={`chip ${!sector ? 'chip--on' : ''}`} onClick={() => setSector('')}>Все</button>
+                {sectors.map((s) => (
+                  <button key={s} className={`chip ${sector === s ? 'chip--on' : ''}`} onClick={() => setSector(s)}>{s}</button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {!ev.salesEnabled && (
-            <div className="alert alert--warn">
-              Касса организатора сейчас не отвечает, поэтому продажи на паузе. Мы не берём деньги, если не уверены, что билет будет
-              выпущен. Загляните чуть позже.
-            </div>
+            <div className="alert alert--warn">Продажи на паузе: не отвечает билетная система организатора. Попробуйте позже.</div>
           )}
           {error && <ErrorBox error={error} />}
           {offers.loading && !offers.data && <Spinner />}
-          {offers.data && list.length === 0 && (
-            <Empty title="Сейчас свободных билетов нет">
-              <p className="muted">Встаньте в лист ожидания — пришлём письмо, как только кто-то сдаст билет.</p>
-              {waitPos ? (
-                <p className="ok-text">Вы в листе ожидания, позиция {waitPos}.</p>
-              ) : (
-                <button className="btn btn--primary" disabled={busy} onClick={joinWaitlist}>
-                  Встать в лист ожидания
-                </button>
-              )}
-            </Empty>
-          )}
-          {list.length > 0 && (
-            <>
-              <OfferPicker offers={list} selectedId={selected?.id ?? null} disabled={!ev.salesEnabled} onSelect={setSelected} />
-              <button className="btn btn--primary btn--block" disabled={!selected || busy || !ev.salesEnabled} onClick={buy}>
-                {busy ? 'Бронируем…' : selected ? `Купить: ${selected.seat.sector}, ${money(selected.faceValue + selected.fee)}` : 'Выберите место'}
-              </button>
-              <p className="muted small center">Место держим 15 минут, пока вы оплачиваете.</p>
-            </>
-          )}
-        </aside>
-      </section>
-    </>
-  );
-}
 
-function EscrowNote() {
-  return (
-    <div className="note note--warn">
-      <strong>Организатор этого концерта пока не подключён к Hand2Hand.</strong> Мы не можем выпустить новый билет через кассу, поэтому
-      работаем по-другому:
-      <ul>
-        <li>модератор проверил, что концерт настоящий, и посмотрел билет продавца;</li>
-        <li>после оплаты вы получите билет продавца, а деньги мы держим у себя до следующего дня после концерта;</li>
-        <li>если билет не пустили на входе — откройте спор в заказе, и мы вернём деньги, а продавец их не получит.</li>
-      </ul>
-      Полной гарантии, как с подключённым организатором, здесь нет: продавец теоретически может передать билет нескольким людям.
+          {lines.length > 0 && (
+            <ul className="tickets">
+              {lines.map((l) => {
+                const o = l.offers[0];
+                return (
+                  <li key={l.key} className="ticket-row">
+                    <div>
+                      <b>{o.seat.sector}</b>
+                      <span className="muted">{seatText(o)}</span>
+                      <span className="ticket-row__tags">
+                        {l.offers.length > 1 && <span className="tag tag--ok">{l.offers.length} шт.</span>}
+                        {o.personalized && <span className="tag tag--muted">именной</span>}
+                        {o.guarantee === 'escrow' && <span className="tag tag--warn">без организатора</span>}
+                      </span>
+                    </div>
+                    <span className="price">{money(o.faceValue + o.fee)}</span>
+                    <button className="btn btn--primary btn--sm" disabled={!ev.salesEnabled || busyId !== null} onClick={() => buy(o)}>
+                      {busyId === o.id ? 'Бронируем…' : 'Купить'}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <div className="notify">
+            <div>
+              <b>{list.length ? 'Нет подходящего места?' : 'Билетов пока нет'}</b>
+              <span className="muted small">Сообщим, когда появятся новые. Ждут: {ev.waitlistCount}</span>
+            </div>
+            {waitPos ? (
+              <span className="ok-text">Вы в списке, позиция {waitPos}</span>
+            ) : (
+              <button className="btn btn--ghost btn--sm" onClick={notifyMe}>Уведомить меня</button>
+            )}
+          </div>
+        </section>
+
+        <aside className="event-side">
+          <GuaranteeNote organizer={ev.organizerConnected} />
+          <div className="panel">
+            <h3>О концерте</h3>
+            <p className="muted">{ev.description}</p>
+            <p className="small">Без сервисного сбора.</p>
+          </div>
+          <Link to={`/sell?event=${ev.id}`} className="sell-cta">
+            <b>Есть билет на этот концерт?</b>
+            <span>Продать →</span>
+          </Link>
+        </aside>
+      </div>
     </div>
   );
 }

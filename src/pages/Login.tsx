@@ -69,7 +69,7 @@ export function Login() {
             />
           </label>
         )}
-        {USE_MOCK && step === 'code' && <p className="muted small">Демо-режим: код — 1234.</p>}
+        {USE_MOCK && step === 'code' && <p className="muted small">Демо: код 1234.</p>}
         {error && <ErrorBox error={error} />}
         <button className="btn btn--primary btn--block" disabled={busy}>
           {busy ? 'Секунду…' : step === 'email' ? 'Получить код' : 'Войти'}

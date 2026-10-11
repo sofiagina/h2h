@@ -1,100 +1,85 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { EventCard } from '../components/EventCard';
 import { Empty, ErrorBox, Spinner } from '../components/ui';
 import { useAsync } from '../lib/useAsync';
 
 export function Home() {
-  const [q, setQ] = useState('');
-  const [query, setQuery] = useState('');
-  const [city, setCity] = useState('');
-
-  // Поиск с задержкой, чтобы не дёргать API на каждую букву.
-  useEffect(() => {
-    const t = setTimeout(() => setQuery(q), 300);
-    return () => clearTimeout(t);
-  }, [q]);
+  const [params, setParams] = useSearchParams();
+  const query = params.get('q') ?? '';
+  const city = params.get('city') ?? '';
+  const [q, setQ] = useState(query);
+  useEffect(() => setQ(query), [query]);
 
   const cities = useAsync(() => api.listCities(), []);
   const events = useAsync(() => api.listEvents({ q: query, city }), [query, city]);
+
+  const setParam = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setParams(next, { replace: true });
+  };
+
+  function search(e: FormEvent) {
+    e.preventDefault();
+    setParam('q', q.trim());
+  }
 
   return (
     <>
       <section className="hero">
         <div className="container hero__inner">
-          <div className="hero__text">
-            <span className="eyebrow">Официально, через кассу организатора</span>
-            <h1>
-              Билеты на распроданные концерты — <span className="accent">по номиналу</span>
-            </h1>
-            <p className="lead">
-              Зрители, которые не могут пойти, сдают билет. Касса организатора аннулирует старый и выпускает новый на ваше имя. Без
-              перекупщиков, переплат и переводов на карту.
-            </p>
-            <div className="hero__actions">
-              <a href="#events" className="btn btn--primary">
-                Найти концерт
-              </a>
-              <Link to="/sell" className="btn btn--ghost">
-                Не могу пойти — сдать билет
-              </Link>
-            </div>
+          <h1>Билеты на распроданные концерты по номиналу</h1>
+          <p className="lead">Покупайте у тех, кто не может пойти.</p>
+          <form className="hero__search" onSubmit={search} role="search">
+            <input className="input" type="search" placeholder="Артист, концерт или город" value={q} onChange={(e) => setQ(e.target.value)} />
+            <button className="btn btn--primary">Найти</button>
+          </form>
+          <div className="chips">
+            <button className={`chip ${!city ? 'chip--on' : ''}`} onClick={() => setParam('city', '')}>Все города</button>
+            {cities.data?.map((c) => (
+              <button key={c} className={`chip ${city === c ? 'chip--on' : ''}`} onClick={() => setParam('city', c)}>{c}</button>
+            ))}
           </div>
-          <ol className="steps">
-            <li>
-              <b>1</b>
-              <div>
-                <strong>Зритель сдаёт билет</strong>
-                <span>Указывает номер заказа — касса проверяет, что билет его.</span>
-              </div>
-            </li>
-            <li>
-              <b>2</b>
-              <div>
-                <strong>Вы покупаете по номиналу</strong>
-                <span>Место бронируется на 15 минут, оплата — в кассу организатора.</span>
-              </div>
-            </li>
-            <li>
-              <b>3</b>
-              <div>
-                <strong>Касса выпускает новый билет</strong>
-                <span>Старый аннулирован, двойников нет. Продавцу возвращаются деньги.</span>
-              </div>
-            </li>
-          </ol>
         </div>
       </section>
 
-      <section className="container section" id="events">
+      <section className="container section">
         <div className="section__head">
-          <h2>Концерты</h2>
-          <div className="filters">
-            <input className="input" type="search" placeholder="Артист, концерт или площадка" value={q} onChange={(e) => setQ(e.target.value)} />
-            <select className="input" value={city} onChange={(e) => setCity(e.target.value)} aria-label="Город">
-              <option value="">Все города</option>
-              {cities.data?.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
-          </div>
+          <h2>{query ? `Найдено по «${query}»` : city ? `Концерты: ${city}` : 'Ближайшие концерты'}</h2>
         </div>
-
         {events.error && <ErrorBox error={events.error} onRetry={() => events.reload()} />}
         {events.loading && !events.data && <Spinner />}
-        {events.data && events.data.length === 0 && (
+        {events.data?.length === 0 && (
           <Empty title="Ничего не нашли">
-            <p className="muted">Попробуйте другой запрос или город.</p>
+            <p className="muted">Попробуйте другой запрос.</p>
           </Empty>
         )}
-        {events.data && events.data.length > 0 && (
-          <div className={`grid ${events.loading ? 'is-loading' : ''}`}>
+        {!!events.data?.length && (
+          <div className={`list ${events.loading ? 'is-loading' : ''}`}>
             {events.data.map((e) => (
               <EventCard key={e.id} event={e} />
             ))}
           </div>
         )}
+      </section>
+
+      <section className="container section how">
+        <h2>Как это работает</h2>
+        <ol className="how__steps">
+          <li><b>1</b><strong>Продавец выставляет билет</strong><span>Мы проверяем его у организатора.</span></li>
+          <li><b>2</b><strong>Вы покупаете по номиналу</strong><span>Картой или по СБП.</span></li>
+          <li><b>3</b><strong>Организатор перевыпускает билет</strong><span>Новый билет оформят на вас.</span></li>
+        </ol>
+        <div className="how__sell">
+          <div>
+            <strong>Не можете пойти?</strong>
+            <span className="muted">Продайте его по номиналу.</span>
+          </div>
+          <Link to="/sell" className="btn btn--primary">Продать билет</Link>
+        </div>
       </section>
     </>
   );

@@ -6,12 +6,17 @@ import { Layout } from './components/Layout';
 import { Account } from './pages/Account';
 import { Admin } from './pages/Admin';
 import { Checkout } from './pages/Checkout';
+import { DisputePage } from './pages/DisputePage';
 import { EventPage } from './pages/EventPage';
 import { Home } from './pages/Home';
 import { Login } from './pages/Login';
 import { OrderPage } from './pages/OrderPage';
 import { Sell } from './pages/Sell';
+import { applyTheme, getTheme } from './lib/theme';
 import './styles.css';
+
+// Тему ставим до первого рендера, чтобы не мигало светлым.
+applyTheme(getTheme());
 
 function NotFound() {
   return (
@@ -32,6 +37,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="events/:id" element={<EventPage />} />
             <Route path="checkout/:orderId" element={<Checkout />} />
             <Route path="orders/:orderId" element={<OrderPage />} />
+            <Route path="disputes/:orderId" element={<DisputePage />} />
             <Route path="sell" element={<Sell />} />
             <Route path="login" element={<Login />} />
             <Route path="account" element={<Account />} />
