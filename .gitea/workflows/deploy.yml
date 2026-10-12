@@ -1,0 +1,49 @@
+# Деплой фронта на сервер: по пушу в main собираем и выкладываем по SSH.
+# Нужен раннер Gitea Actions и секреты (см. deploy-server.md).
+name: Deploy frontend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # На своём домене сайт в корне (BASE_PATH=/), мок включён, пока нет бэкенда.
+      # Когда бэкенд заработает — поставить VITE_USE_MOCK=false в переменных репозитория.
+      - run: npm run build
+        env:
+          BASE_PATH: ${{ vars.BASE_PATH || '/' }}
+          VITE_USE_MOCK: ${{ vars.VITE_USE_MOCK || 'true' }}
+
+      # SPA-фолбэк на случай, если сервер отдаёт 404 вместо index.html.
+      - run: cp dist/index.html dist/404.html
+
+      - name: Выложить dist на сервер (rsync по SSH)
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          PORT: ${{ secrets.DEPLOY_PORT }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          TARGET: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -e
+          command -v rsync >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq rsync; }
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          PORT="${PORT:-22}"
+          ssh-keyscan -p "$PORT" -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          rsync -az --delete -e "ssh -p $PORT -i ~/.ssh/id_deploy" dist/ "$USER@$HOST:$TARGET/"
+          echo "Выложено в $USER@$HOST:$TARGET"
