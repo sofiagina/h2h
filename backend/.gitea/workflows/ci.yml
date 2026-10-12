@@ -1,0 +1,37 @@
+# Сборка и тесты на каждый пуш и pull request.
+# Метка ubuntu-latest должна быть у зарегистрированного раннера Gitea (см. deploy/README.md).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Пока каркаса Spring Boot нет, сборка пропускается, а не падает.
+      - name: Проверить, есть ли проект Maven
+        id: guard
+        run: |
+          if [ -f pom.xml ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "pom.xml ещё нет — каркас не создан, сборку пропускаем"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # Интеграционные тесты на Testcontainers поднимают Postgres сами,
+      # поэтому у раннера должен быть доступ к docker.
+      - name: Сборка и тесты
+        if: steps.guard.outputs.ready == 'true'
+        run: mvn -B verify
