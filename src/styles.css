@@ -535,3 +535,6 @@ a.item:hover { border-color: var(--line-strong); }
   .banner__icon { display: none; }
   .nav__icon { width: auto; height: auto; justify-content: start; padding: 12px 14px; border-radius: 8px; }
 }
+
+/* Пункты выпадающих списков: иначе в тёмной теме светлый текст на белом */
+select option { background: var(--surface); color: var(--ink); }
