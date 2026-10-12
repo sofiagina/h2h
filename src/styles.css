@@ -538,3 +538,15 @@ a.item:hover { border-color: var(--line-strong); }
 
 /* Пункты выпадающих списков: иначе в тёмной теме светлый текст на белом */
 select option { background: var(--surface); color: var(--ink); }
+
+/* Меню профиля */
+.profile { position: relative; }
+.profile__menu { position: absolute; top: calc(100% + 8px); right: 0; min-width: 220px; z-index: 30; display: grid; padding: 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.profile__email { display: flex; align-items: center; gap: 8px; padding: 8px 10px 10px; color: var(--ink-2); font-size: 13px; border-bottom: 1px solid var(--line); margin-bottom: 4px; overflow-wrap: anywhere; }
+.profile__menu a, .profile__logout { display: block; width: 100%; text-align: left; padding: 10px; border: 0; background: none; font: inherit; color: var(--ink); text-decoration: none; border-radius: 8px; cursor: pointer; }
+.profile__menu a:hover, .profile__logout:hover { background: var(--bg); }
+.profile__logout { color: var(--bad); font-weight: 600; margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; }
+@media (max-width: 720px) {
+  .profile { width: 100%; }
+  .profile__menu { position: static; box-shadow: none; border: 0; padding: 0; min-width: 0; }
+}

@@ -6,10 +6,12 @@ import { resetMockData } from '../api/mock';
 import { useAuth } from '../auth/AuthContext';
 import { page } from '../lib/motion';
 import { IconHelp, IconMoon, IconSearch, IconSun, IconUser } from './icons';
+import { ProfileMenu } from './ProfileMenu';
 import { applyTheme, getTheme, isDarkNow, type Theme } from '../lib/theme';
 
 export function Layout() {
   const { user, logout } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -50,20 +52,23 @@ export function Layout() {
             <span />
           </button>
           <nav className={`nav ${open ? 'nav--open' : ''}`} onClick={close}>
-            {user?.role === 'admin' && <NavLink to="/admin">Админка</NavLink>}
-            <NavLink to="/account?tab=tickets" className={() => (location.pathname === '/account' && !location.search.includes('sell') ? 'active' : '')}>Мои билеты</NavLink>
-            <NavLink to="/account?tab=sell" className={() => (location.search.includes('tab=sell') ? 'active' : '')}>Мои продажи</NavLink>
+            {isAdmin ? (
+              <NavLink to="/admin">Админка</NavLink>
+            ) : (
+              <>
+                <NavLink to="/account?tab=tickets" className={() => (location.pathname === '/account' && !location.search.includes('sell') ? 'active' : '')}>Мои билеты</NavLink>
+                <NavLink to="/account?tab=sell" className={() => (location.search.includes('tab=sell') ? 'active' : '')}>Мои продажи</NavLink>
+              </>
+            )}
             <NavLink to="/how" className="nav__icon" title="Как это работает" aria-label="Как это работает"><IconHelp size={22} /></NavLink>
             {user ? (
-              <button className="nav__icon avatar" onClick={logout} title={`${user.email} · выйти`} aria-label="Выйти">
-                {user.email.slice(0, 1).toUpperCase()}
-              </button>
+              <ProfileMenu user={user} onLogout={logout} />
             ) : (
               <Link to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} className="nav__icon" title="Войти" aria-label="Войти">
                 <IconUser size={22} />
               </Link>
             )}
-            <Link to="/sell" className="btn btn--primary btn--sm">Продать билет</Link>
+            {!isAdmin && <Link to="/sell" className="btn btn--primary btn--sm">Продать билет</Link>}
           </nav>
           <button className="theme-btn" onClick={toggleTheme} aria-label={dark ? 'Включить светлую тему' : 'Включить тёмную тему'} title={dark ? 'Светлая тема' : 'Тёмная тема'}>
             <AnimatePresence mode="wait" initial={false}>

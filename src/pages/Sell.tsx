@@ -76,6 +76,8 @@ export function Sell() {
 
   if (!ready) return <div className="container section"><Spinner /></div>;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  // Админ — модератор, не продавец: продажа ему недоступна.
+  if (user.role === 'admin') return <Navigate to="/admin" replace />;
 
   const set = (k: keyof Form) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value });
   const noOrganizer = custom || (event !== null && !event.organizerConnected);
