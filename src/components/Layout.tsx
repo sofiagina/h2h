@@ -52,14 +52,7 @@ export function Layout() {
             <span />
           </button>
           <nav className={`nav ${open ? 'nav--open' : ''}`} onClick={close}>
-            {isAdmin ? (
-              <NavLink to="/admin">Админка</NavLink>
-            ) : (
-              <>
-                <NavLink to="/account?tab=tickets" className={() => (location.pathname === '/account' && !location.search.includes('sell') ? 'active' : '')}>Мои билеты</NavLink>
-                <NavLink to="/account?tab=sell" className={() => (location.search.includes('tab=sell') ? 'active' : '')}>Мои продажи</NavLink>
-              </>
-            )}
+            {isAdmin && <NavLink to="/admin">Админка</NavLink>}
             <NavLink to="/how" className="nav__icon" title="Как это работает" aria-label="Как это работает"><IconHelp size={22} /></NavLink>
             {user ? (
               <ProfileMenu user={user} onLogout={logout} />

@@ -63,9 +63,7 @@ export function ProfileMenu({ user, onLogout }: { user: User; onLogout(): void }
               <IconUser size={16} />
               {user.email}
             </div>
-            {user.role === 'admin' ? (
-              <Link to="/admin" role="menuitem">Админка</Link>
-            ) : (
+            {user.role !== 'admin' && (
               <>
                 <Link to="/account?tab=tickets" role="menuitem">Мои билеты</Link>
                 <Link to="/account?tab=sell" role="menuitem">Мои продажи</Link>
