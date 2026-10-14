@@ -12,7 +12,11 @@ const MODES: Record<AggregatorMode, string> = {
   force_off: 'Принудительно выключено',
 };
 
-const salesOn = (a: Aggregator) => a.mode === 'force_on' || (a.mode === 'auto' && a.status === 'UP');
+const API_DOCS_URL = import.meta.env.DEV
+  ? '/docs/api.html'
+  : 'https://git.tunele.ru/h2h/Front-AdminPanel/src/branch/main/backend/openapi.yaml';
+
+const salesOn =(a: Aggregator) => a.mode === 'force_on' || (a.mode === 'auto' && a.status === 'UP');
 
 export function Admin() {
   const { user, ready } = useAuth();
@@ -38,7 +42,8 @@ export function Admin() {
         <div>
           <h1 className="h2">Админка</h1>
         </div>
-        <a className="btn btn--ghost btn--sm" href={`${import.meta.env.BASE_URL}docs/api.html`} target="_blank" rel="noreferrer">
+        {/* Контракт не публикуем на сайте: локально — dev-сервер, иначе — закрытый репозиторий. */}
+        <a className="btn btn--ghost btn--sm" href={API_DOCS_URL} target="_blank" rel="noreferrer">
           Контракт API
         </a>
       </div>

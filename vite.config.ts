@@ -1,11 +1,11 @@
-import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 /**
- * Контракт API для бэкендера на самом сайте: /docs/api.html (Redoc) и /docs/openapi.yaml.
- * Источник — backend/, при сборке копируется в dist/docs, в dev отдаётся прямо из backend/.
+ * Контракт API только для локальной разработки: /docs/api.html (Redoc) и /docs/openapi.yaml
+ * отдаются dev-сервером прямо из backend/. В сборку не попадают — сайт публичный, а контракт
+ * смотрят в закрытом репозитории.
  */
 const DOCS: Record<string, string> = {
   'api.html': 'backend/docs/api.html',
@@ -13,12 +13,9 @@ const DOCS: Record<string, string> = {
 };
 
 function apiDocs(): Plugin {
-  let outDir = 'dist';
   return {
     name: 'h2h-api-docs',
-    configResolved(c) {
-      outDir = resolve(c.root, c.build.outDir);
-    },
+    apply: 'serve',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const name = req.url?.split('?')[0].split('/docs/')[1];
@@ -27,10 +24,6 @@ function apiDocs(): Plugin {
         res.setHeader('Content-Type', name.endsWith('.html') ? 'text/html; charset=utf-8' : 'text/yaml; charset=utf-8');
         res.end(readFileSync(src));
       });
-    },
-    closeBundle() {
-      mkdirSync(resolve(outDir, 'docs'), { recursive: true });
-      for (const [name, src] of Object.entries(DOCS)) copyFileSync(src, resolve(outDir, 'docs', name));
     },
   };
 }

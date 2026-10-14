@@ -11,9 +11,11 @@
 Светлая и тёмная темы: по умолчанию как в системе, переключатель в шапке.
 
 > **Контракт API для бэкенда (OpenAPI 3.1)**
-> - открыть в браузере: https://sofiagina.github.io/h2h/docs/api.html, на своём сервере — `/docs/api.html`, в админке — кнопка «Контракт API»;
-> - исходник: [`backend/openapi.yaml`](backend/openapi.yaml) (на сайте — `/docs/openapi.yaml`), флоу оплаты — [`backend/docs/payment-flow.md`](backend/docs/payment-flow.md);
-> - локально: `npm run dev` → http://localhost:5173/docs/api.html.
+> - исходник: [`backend/openapi.yaml`](backend/openapi.yaml), флоу оплаты — [`backend/docs/payment-flow.md`](backend/docs/payment-flow.md);
+> - красиво (Redoc): `npm run dev` → http://localhost:5173/docs/api.html, или скачать [`backend/docs/api.html`](backend/docs/api.html) и открыть двойным кликом;
+> - в админке — кнопка «Контракт API» (ведёт в репозиторий, нужен доступ).
+>
+> На публичный сайт контракт не выкладывается — только dev-сервер и репозиторий.
 >
 > После правки `openapi.yaml` пересобрать `backend/docs/api.html` — спека встроена в него.
 
