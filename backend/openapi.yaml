@@ -53,7 +53,7 @@ paths:
               properties:
                 email: { type: string, format: email }
       responses:
-        "204": { description: Код отправлен (всегда 204, даже если такого пользователя ещё нет) }
+        "204": { description: "Код отправлен (всегда 204, даже если такого пользователя ещё нет)" }
         "400": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
 
@@ -123,7 +123,7 @@ paths:
       summary: Список концертов (витрина или поиск продавца)
       security: []
       parameters:
-        - { name: q, in: query, schema: { type: string }, description: Поиск по названию, артисту, площадке, городу }
+        - { name: q, in: query, schema: { type: string }, description: "Поиск по названию, артисту, площадке, городу" }
         - { name: city, in: query, schema: { type: string } }
         - { name: group, in: query, schema: { $ref: "#/components/schemas/EventGroup" } }
         - name: scope
@@ -391,6 +391,34 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /sell-requests/{id}/cancel:
+    post:
+      tags: [sell]
+      summary: Снять объявление с продажи
+      description: >
+        Только своё и только пока билет не куплен (статусы review, pending, listed).
+        Предложение убирается из витрины, заявка получает статус cancelled, выплата — cancelled.
+        Если билет сейчас забронирован покупателем (заказ RESERVED или PAID), снимать нельзя —
+        409 RESERVED; после истечения брони можно повторить. Повторный вызов на уже снятой
+        заявке — 409 INVALID. Действие пишется в аудит (sell:cancel).
+      parameters:
+        - $ref: "#/components/parameters/SellRequestId"
+      responses:
+        "200":
+          description: Снято
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SellRequest" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409":
+          description: >
+            ALREADY_SOLD — билет уже купили; RESERVED — билет сейчас оплачивают;
+            INVALID — заявка уже закрыта (rejected или cancelled).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   # ---------------- account ----------------
   /users/me/orders:
     get:
@@ -439,6 +467,34 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/EventItem" } }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /users/me/notifications:
+    get:
+      tags: [account]
+      summary: Лента уведомлений
+      description: >
+        События по покупкам, продажам, выплатам и спорам текущего пользователя, новые сверху,
+        не больше 50. Бэкенд пишет их в таблицу событий в момент перехода статуса
+        (оплата, перевыпуск, FAILED/EXPIRED, выставлено/отклонено/снято/продано, выплата,
+        спор открыт/сообщение/решение). Те же события уходят письмом. title и text — готовый
+        текст по-русски; фронт по kind выбирает только иконку. read = at не позже отметки
+        «прочитано» пользователя.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationFeed" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /users/me/notifications/read:
+    post:
+      tags: [account]
+      summary: Отметить все уведомления прочитанными
+      description: Ставит отметку «прочитано» на текущий момент. Идемпотентно.
+      responses:
+        "204": { description: Готово }
         "401": { $ref: "#/components/responses/Error" }
 
   # ---------------- admin ----------------
@@ -553,7 +609,7 @@ paths:
               schema: { type: array, items: { $ref: "#/components/schemas/AdminDispute" } }
         "403": { $ref: "#/components/responses/Error" }
 
-  /admin/disputes/{orderId}/resolve:
+  /admin/disputes/{id}/resolve:
     post:
       tags: [admin]
       summary: Решить спор
@@ -665,7 +721,8 @@ components:
       description: organizer — перевыпуск билета организатором; escrow — передаёт продавец, выплата после концерта.
     SellStatus:
       type: string
-      enum: [review, pending, listed, sold, rejected]
+      enum: [review, pending, listed, sold, rejected, cancelled]
+      description: cancelled — продавец сам снял объявление до покупки.
     DisputeStatus:
       type: string
       enum: [open, refunded, rejected]
@@ -953,6 +1010,44 @@ components:
           type: array
           items: { type: string, format: binary }
           description: До 5 файлов (image/pdf/video) по 20 МБ каждый.
+
+    NotificationKind:
+      type: string
+      enum:
+        [order_paid, order_issued, order_failed, order_expired, order_refunded,
+         sell_listed, sell_rejected, sell_sold, sell_cancelled, payout_sent,
+         dispute_opened, dispute_message, dispute_resolved]
+
+    AppNotification:
+      type: object
+      required: [id, kind, title, text, at, target, read]
+      properties:
+        id: { type: string }
+        kind: { $ref: "#/components/schemas/NotificationKind" }
+        title: { type: string, example: Билет купили }
+        text: { type: string, example: "Би-2, Танцпол: 4 500 ₽" }
+        at: { type: string, format: date-time }
+        target:
+          type: object
+          required: [type, id]
+          description: >
+            Куда ведёт клик. order — id заказа; dispute — id заказа со спором;
+            sell — id заявки на продажу.
+          properties:
+            type: { type: string, enum: [order, dispute, sell] }
+            id: { type: string }
+        read: { type: boolean }
+
+    NotificationFeed:
+      type: object
+      required: [items, unread]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppNotification" }
+        unread:
+          type: integer
+          description: Сколько непрочитанных — для точки на аватаре.
 
     WaitlistEntry:
       type: object

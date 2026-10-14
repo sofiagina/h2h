@@ -1,6 +1,9 @@
+import { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
-import { api } from '../api';
+import { api, type AppNotification, type NotificationKind, type SellStatus } from '../api';
 import { useAuth } from '../auth/AuthContext';
+import { IconBell, IconChat, IconShield, IconSwap, IconTicket, IconWallet } from '../components/icons';
+import { NOTIFICATIONS_READ } from '../lib/notifications';
 import { DisputeBadge, Empty, ErrorBox, OrderBadge, PayoutBadge, SellBadge, Spinner } from '../components/ui';
 import { dateLong, dateTime, money, seatLabel } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
@@ -8,7 +11,8 @@ import { useAsync } from '../lib/useAsync';
 const TABS = [
   ['tickets', 'Купленные'],
   ['sell', 'Мои продажи'],
-  ['waitlist', 'Уведомления'],
+  ['notifications', 'Уведомления'],
+  ['waitlist', 'Жду билеты'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -39,6 +43,7 @@ export function Account() {
       </div>
       {tab === 'tickets' && <Tickets />}
       {tab === 'sell' && <SellList />}
+      {tab === 'notifications' && <Notifications />}
       {tab === 'waitlist' && <Waitlist />}
     </div>
   );
@@ -108,6 +113,7 @@ function SellList() {
             </div>
           )}
           {s.rejectReason && <p className="small bad-text">Причина отказа: {s.rejectReason}</p>}
+          {CANCELLABLE.includes(s.status) && <CancelSale id={s.id} onDone={() => items.reload(true)} />}
           {s.disputeOrderId && (
             <Link to={`/disputes/${s.disputeOrderId}`} className="dispute-link dispute-link--sm">
               <span>
@@ -119,6 +125,115 @@ function SellList() {
           )}
         </li>
       ))}
+    </ul>
+  );
+}
+
+/** Снять можно, пока билет не купили. */
+const CANCELLABLE: SellStatus[] = ['review', 'pending', 'listed'];
+
+function CancelSale({ id, onDone }: { id: string; onDone(): void }) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function cancel() {
+    setBusy(true);
+    setError('');
+    try {
+      await api.cancelSellRequest(id);
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+      setConfirm(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="cancel-sale small">
+      {error && <p className="bad-text">{error}</p>}
+      {confirm ? (
+        <>
+          <span>Снять билет с продажи?</span>
+          <button className="btn btn--ghost btn--sm bad-text" onClick={cancel} disabled={busy}>
+            {busy ? 'Снимаем…' : 'Да, снять'}
+          </button>
+          <button className="link-btn" onClick={() => setConfirm(false)} disabled={busy}>Оставить</button>
+        </>
+      ) : (
+        <button className="link-btn" onClick={() => setConfirm(true)}>Снять с продажи</button>
+      )}
+    </div>
+  );
+}
+
+const KIND_ICON: Record<NotificationKind, typeof IconBell> = {
+  order_paid: IconWallet,
+  order_issued: IconTicket,
+  order_failed: IconBell,
+  order_expired: IconBell,
+  order_refunded: IconWallet,
+  sell_listed: IconTicket,
+  sell_rejected: IconBell,
+  sell_sold: IconSwap,
+  sell_cancelled: IconTicket,
+  payout_sent: IconWallet,
+  dispute_opened: IconShield,
+  dispute_message: IconChat,
+  dispute_resolved: IconShield,
+};
+
+const BAD_KINDS: NotificationKind[] = ['order_failed', 'sell_rejected', 'dispute_opened'];
+
+function targetUrl(n: AppNotification) {
+  if (n.target.type === 'dispute') return `/disputes/${n.target.id}`;
+  if (n.target.type === 'order') return `/orders/${n.target.id}`;
+  return '/account?tab=sell';
+}
+
+/** Лента событий: покупки, продажи, выплаты, споры. Открыли вкладку — всё прочитано. */
+function Notifications() {
+  const feed = useAsync(() => api.myNotifications(), []);
+  const loaded = !!feed.data;
+  const unread = feed.data?.unread ?? 0;
+
+  useEffect(() => {
+    if (!loaded || !unread) return;
+    api
+      .markNotificationsRead()
+      .then(() => window.dispatchEvent(new Event(NOTIFICATIONS_READ)))
+      .catch(() => {});
+  }, [loaded, unread]);
+
+  if (feed.error) return <ErrorBox error={feed.error} onRetry={() => feed.reload()} />;
+  if (!feed.data) return <Spinner />;
+  if (!feed.data.items.length)
+    return (
+      <Empty title="Пока тихо">
+        <p className="muted">Здесь появятся оплаты, продажи, выплаты и ответы в спорах.</p>
+      </Empty>
+    );
+  return (
+    <ul className="items">
+      {feed.data.items.map((n) => {
+        const Icon = KIND_ICON[n.kind];
+        return (
+          <li key={n.id}>
+            <Link to={targetUrl(n)} className={`item notice ${n.read ? '' : 'notice--new'}`}>
+              <span className={`notice__icon ${BAD_KINDS.includes(n.kind) ? 'notice__icon--bad' : ''}`}>
+                <Icon size={18} />
+              </span>
+              <div className="notice__body">
+                <strong>{n.title}</strong>
+                <span className="muted small">{n.text}</span>
+              </div>
+              <span className="muted small notice__at">{dateTime(n.at)}</span>
+            </Link>
+          </li>
+        );
+      })}
     </ul>
   );
 }

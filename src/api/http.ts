@@ -103,6 +103,9 @@ export const httpApi: Api = {
     return req('POST', '/sell-requests', { body: form });
   },
   mySellRequests: () => req('GET', '/users/me/sell-requests'),
+  cancelSellRequest: (id) => req('POST', `/sell-requests/${id}/cancel`),
+  myNotifications: () => req('GET', '/users/me/notifications'),
+  markNotificationsRead: () => req('POST', '/users/me/notifications/read'),
   joinWaitlist: (eventId) => req('POST', `/events/${eventId}/waitlist`),
   myWaitlist: () => req('GET', '/users/me/waitlist'),
   setFavorite: (eventId, on) => req(on ? 'PUT' : 'DELETE', `/events/${eventId}/favorite`),

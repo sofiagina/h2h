@@ -10,8 +10,11 @@ export type AggregatorStatus = 'UP' | 'DEGRADED' | 'DOWN';
 export type AggregatorMode = 'auto' | 'force_on' | 'force_off';
 export type OrderStatus = 'CREATED' | 'RESERVED' | 'PAID' | 'ISSUED' | 'EXPIRED' | 'FAILED' | 'REFUNDED';
 export type EventStatus = 'scheduled' | 'postponed' | 'cancelled' | 'sold_out';
-/** review — новый концерт на ручной проверке; pending — проверяем билет у организатора или модератором. */
-export type SellStatus = 'review' | 'pending' | 'listed' | 'sold' | 'rejected';
+/**
+ * review — новый концерт на ручной проверке; pending — проверяем билет у организатора или модератором;
+ * cancelled — продавец сам снял объявление до покупки.
+ */
+export type SellStatus = 'review' | 'pending' | 'listed' | 'sold' | 'rejected' | 'cancelled';
 /**
  * organizer — организатор подключён: перевыпускает билет на покупателя, дублей нет.
  * escrow — организатора нет: билет передаёт продавец, выплата — через сутки после начала концерта.
@@ -213,6 +216,39 @@ export type PayoutInput =
   | { method: 'card'; cardToken: string; cardLast4: string }
   | { method: 'account'; holder: string; bik: string; account: string };
 
+/** Что произошло. По kind фронт выбирает иконку; текст приходит готовым. */
+export type NotificationKind =
+  | 'order_paid'
+  | 'order_issued'
+  | 'order_failed'
+  | 'order_expired'
+  | 'order_refunded'
+  | 'sell_listed'
+  | 'sell_rejected'
+  | 'sell_sold'
+  | 'sell_cancelled'
+  | 'payout_sent'
+  | 'dispute_opened'
+  | 'dispute_message'
+  | 'dispute_resolved';
+
+/** Запись ленты «Уведомления»: события по покупкам, продажам, выплатам и спорам. */
+export interface AppNotification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  text: string;
+  at: string;
+  /** Куда ведёт клик: заказ, спор по заказу или «Мои продажи». */
+  target: { type: 'order' | 'dispute' | 'sell'; id: string };
+  read: boolean;
+}
+
+export interface NotificationFeed {
+  items: AppNotification[];
+  unread: number;
+}
+
 export interface WaitlistEntry {
   id: string;
   event: EventRef;
@@ -301,6 +337,10 @@ export interface Api {
 
   createSellRequest(input: SellRequestInput): Promise<SellRequest>;
   mySellRequests(): Promise<SellRequest[]>;
+  /** Снять объявление: можно, пока билет не купили и не бронируют. */
+  cancelSellRequest(id: string): Promise<SellRequest>;
+  myNotifications(): Promise<NotificationFeed>;
+  markNotificationsRead(): Promise<void>;
   joinWaitlist(eventId: string): Promise<WaitlistEntry>;
   myWaitlist(): Promise<WaitlistEntry[]>;
   setFavorite(eventId: string, on: boolean): Promise<void>;

@@ -100,6 +100,9 @@ npm run dev
 | POST | `/orders/{id}/dispute/messages` | **multipart**: `text`, `files[]` → `DisputeView` |
 | GET | `/users/me/orders` · `/users/me/sell-requests` · `/users/me/waitlist` | списки для кабинета |
 | POST | `/sell-requests` | **multipart**: `data` (JSON `SellRequestInput` без файла; `eventId` **или** `newEvent`; `payout` — `{ method: 'sbp', phone, bank }` · `{ method: 'card', cardToken, cardLast4 }` · `{ method: 'account', holder, bik, account }`), `ticketFile` → `SellRequest` |
+| POST | `/sell-requests/{id}/cancel` | снять своё объявление, пока билет не купили → `SellRequest` (`status: cancelled`); `409 ALREADY_SOLD` / `RESERVED` (билет сейчас оплачивают) / `INVALID` (уже закрыто) |
+| GET | `/users/me/notifications` | → `{ items: AppNotification[], unread }`: оплата, билет готов, не удалось, бронь истекла, в продаже, отклонено, снято, продано, выплата, спор; новые сверху, до 50 |
+| POST | `/users/me/notifications/read` | всё прочитано → 204 |
 | GET | `/admin/aggregators` | → `Aggregator[]` с последними 24 проверками |
 | PATCH | `/admin/aggregators/{id}` | `{ mode, reason }` → `Aggregator` (пишется в журнал действий) |
 | POST | `/admin/aggregators/{id}/check` | внеочередная проверка → `Aggregator` |

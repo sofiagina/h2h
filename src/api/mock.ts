@@ -21,6 +21,7 @@ import {
   type DisputeView,
   type EventGroup,
   type EventItem,
+  type AppNotification,
   type EventRef,
   type Guarantee,
   type HealthCheck,
@@ -48,11 +49,17 @@ type EventRow = Omit<EventItem, 'salesEnabled' | 'minFaceValue' | 'availableCoun
   group?: EventGroup;
 };
 type OfferRow = Offer & { state: 'available' | 'reserved' | 'sold' };
-type OrderRow = Order & { userId: string; paidAt?: string; issuedAt?: string };
+/** endedAt — когда заказ стал FAILED или EXPIRED: нужно для ленты уведомлений. */
+type OrderRow = Order & { userId: string; paidAt?: string; issuedAt?: string; endedAt?: string };
 type SellRow = Omit<AdminSellRequest, 'payout' | 'disputeOrderId' | 'disputeStatus'> & {
   userId: string;
   /** Заказ, в котором билет продан: по нему продавец попадает в спор. */
   orderId?: string;
+  /** Предложение в витрине, созданное по заявке: по нему снимаем с продажи. */
+  offerId?: string;
+  listedAt?: string;
+  /** Когда отклонили или сняли с продажи. */
+  closedAt?: string;
   payout: Pick<Payout, 'method' | 'details'>;
 };
 interface WaitRow {
@@ -76,6 +83,8 @@ interface FavRow {
 
 interface DB {
   favorites: FavRow[];
+  /** До какого момента пользователь видел уведомления: всё позже — непрочитанное. */
+  notificationsSeen: Record<string, string>;
   users: User[];
   events: EventRow[];
   offers: OfferRow[];
@@ -268,6 +277,7 @@ function seed(): DB {
 
   return {
     favorites: [],
+    notificationsSeen: {},
     users: [],
     events,
     offers,
@@ -311,6 +321,7 @@ function load(): DB {
 /** Заявки, сохранённые до появления карт и счетов: выплата была только по СБП. */
 function normalize(data: DB): DB {
   data.favorites ??= [];
+  data.notificationsSeen ??= {};
   const known = new Set(data.events.map((e) => e.id));
   const missing = extraEvents().filter((e) => !known.has(e.id));
   if (missing.length) {
@@ -411,7 +422,7 @@ function decorate(e: EventRow, user: User | null = optionalUser()): EventItem {
 }
 
 function toOrder(o: OrderRow): Order {
-  const { userId: _u, paidAt: _p, issuedAt: _i, ...rest } = o;
+  const { userId: _u, paidAt: _p, issuedAt: _i, endedAt: _e, ...rest } = o;
   return rest;
 }
 
@@ -426,6 +437,7 @@ const saleOfOrder = (orderId: string) => db.sell.find((s) => s.orderId === order
 function payoutOf(s: SellRow): Payout {
   const order = s.orderId ? db.orders.find((o) => o.id === s.orderId) : undefined;
   const base = { ...s.payout };
+  if (s.status === 'cancelled' || s.status === 'rejected') return { ...base, status: 'cancelled', at: null };
   if (!order || (order.status !== 'ISSUED' && order.status !== 'REFUNDED')) return { ...base, status: 'waiting', at: null };
   if (order.dispute?.status === 'refunded') return { ...base, status: 'cancelled', at: null };
   if (order.dispute?.status === 'open') return { ...base, status: 'frozen', at: null };
@@ -453,8 +465,19 @@ function toAdminSell(s: SellRow): AdminSellRequest {
 }
 
 function listOffer(s: SellRow) {
+  const row = offer(s.event.id, s.seat, s.faceValue / 100, s.guarantee);
   s.status = 'listed';
-  db.offers.push(offer(s.event.id, s.seat, s.faceValue / 100, s.guarantee));
+  s.offerId = row.id;
+  s.listedAt = now();
+  db.offers.push(row);
+}
+
+/** Предложение заявки в витрине. У старых данных связи нет — ищем по концерту, цене и сектору. */
+function offerOfSale(s: SellRow) {
+  if (s.offerId) return db.offers.find((o) => o.id === s.offerId);
+  return db.offers.find(
+    (o) => o.eventId === s.event.id && o.faceValue === s.faceValue && o.seat.sector === s.seat.sector && o.state !== 'sold',
+  );
 }
 
 /** Организатор аннулировал билет продавца и выпустил новый на покупателя. */
@@ -464,7 +487,9 @@ function issue(order: OrderRow) {
   order.tickets = [{ id: id('tk'), barcode: String(Math.floor(1e11 + Math.random() * 9e11)), barcodeType: 'QR', pdfUrl: null }];
   const o = db.offers.find((x) => x.id === order.offer.id);
   if (o) o.state = 'sold';
-  const sale = db.sell.find((s) => s.event.id === order.event.id && s.status === 'listed' && s.faceValue === order.offer.faceValue && !s.orderId);
+  const sale =
+    db.sell.find((s) => s.offerId === order.offer.id) ??
+    db.sell.find((s) => !s.offerId && s.event.id === order.event.id && s.status === 'listed' && s.faceValue === order.offer.faceValue && !s.orderId);
   if (sale) {
     sale.status = 'sold';
     sale.orderId = order.id;
@@ -479,6 +504,7 @@ function settle() {
   for (const o of db.orders) {
     if (o.status === 'RESERVED' && o.expiresAt && Date.parse(o.expiresAt) < t) {
       o.status = 'EXPIRED';
+      o.endedAt = o.expiresAt;
       const of = db.offers.find((x) => x.id === o.offer.id);
       if (of?.state === 'reserved') of.state = 'available';
       changed = true;
@@ -527,6 +553,73 @@ function findOrderForDispute(orderId: string) {
   const viewer = order && viewerOf(order, user);
   if (!order || !viewer) throw new ApiError('NOT_FOUND', 'Заказ не найден', 404);
   return { order, viewer };
+}
+
+const seatText = (s: Seat) => [s.sector, s.row && `ряд ${s.row}`, s.place && `место ${s.place}`].filter(Boolean).join(', ');
+const rub = (kop: number) => `${(kop / 100).toLocaleString('ru-RU')} ₽`;
+
+type Draft = Omit<AppNotification, 'id' | 'read'>;
+
+/**
+ * Лента уведомлений. В бэкенде это таблица событий, которую пишут доменные сервисы;
+ * в демо собираем её из текущего состояния заказов, заявок и споров.
+ */
+function notificationsOf(user: User): Draft[] {
+  const out: Draft[] = [];
+  const push = (d: Draft | false | null | undefined | '') => {
+    if (d) out.push(d);
+  };
+  const toOrder = (orderId: string) => ({ type: 'order' as const, id: orderId });
+  const toDispute = (orderId: string) => ({ type: 'dispute' as const, id: orderId });
+
+  // Покупатель.
+  for (const o of db.orders.filter((x) => x.userId === user.id)) {
+    const t = o.event.title;
+    push(o.paidAt && { kind: 'order_paid', title: 'Оплата прошла', text: `${t}: ${rub(o.total)}`, at: o.paidAt, target: toOrder(o.id) });
+    push(o.issuedAt && {
+      kind: 'order_issued', title: 'Билет готов',
+      text: o.offer.guarantee === 'organizer' ? `${t}: билет оформлен на вас` : `${t}: продавец передал билет`,
+      at: o.issuedAt, target: toOrder(o.id),
+    });
+    push(o.status === 'FAILED' && { kind: 'order_failed', title: 'Не удалось оформить билет', text: `${t}: деньги не списаны`, at: o.endedAt ?? o.createdAt, target: toOrder(o.id) });
+    push(o.status === 'EXPIRED' && { kind: 'order_expired', title: 'Бронь истекла', text: `${t}: билет вернулся в продажу`, at: o.endedAt ?? o.expiresAt ?? o.createdAt, target: toOrder(o.id) });
+  }
+
+  // Продавец.
+  for (const s of db.sell.filter((x) => x.userId === user.id)) {
+    const t = `${s.event.title}, ${seatText(s.seat)}`;
+    const order = s.orderId ? db.orders.find((o) => o.id === s.orderId) : undefined;
+    const sell = { type: 'sell' as const, id: s.id };
+    push(s.listedAt && { kind: 'sell_listed', title: 'Билет в продаже', text: t, at: s.listedAt, target: sell });
+    push(s.status === 'rejected' && { kind: 'sell_rejected', title: 'Заявка отклонена', text: s.rejectReason ?? t, at: s.closedAt ?? s.createdAt, target: sell });
+    push(s.status === 'cancelled' && { kind: 'sell_cancelled', title: 'Вы сняли билет с продажи', text: t, at: s.closedAt ?? s.createdAt, target: sell });
+    push(order?.paidAt && { kind: 'sell_sold', title: 'Билет купили', text: `${t}: ${rub(s.faceValue)}`, at: order.paidAt, target: sell });
+    const payout = payoutOf(s);
+    push(payout.status === 'sent' && payout.at && { kind: 'payout_sent', title: 'Деньги отправлены', text: `${rub(s.faceValue)} → ${s.payout.details}`, at: payout.at, target: sell });
+  }
+
+  // Споры: покупатель и продавец видят ответы друг друга и решение поддержки.
+  for (const o of db.orders.filter((x) => x.dispute)) {
+    const me = viewerOf(o, user);
+    if (me !== 'buyer' && me !== 'seller') continue;
+    const d = o.dispute!;
+    const t = o.event.title;
+    if (me === 'seller') push({ kind: 'dispute_opened', title: 'Покупатель открыл спор', text: `${t}: выплата на паузе, ответьте в споре`, at: d.openedAt, target: toDispute(o.id) });
+    for (const msg of d.messages.slice(1)) {
+      // Своё не показываем; финальное сообщение поддержки — это решение, оно ниже.
+      if (msg.author === me || (msg.author === 'support' && d.resolvedAt === msg.at)) continue;
+      const who = { buyer: 'Покупатель', seller: 'Продавец', support: 'Поддержка' }[msg.author];
+      push({ kind: 'dispute_message', title: `${who}: новое сообщение в споре`, text: msg.text || 'Приложены файлы', at: msg.at, target: toDispute(o.id) });
+    }
+    if (d.resolvedAt) {
+      const refunded = d.status === 'refunded';
+      const title = refunded ? (me === 'buyer' ? 'Спор решён: деньги вернём' : 'Спор решён в пользу покупателя') : 'Спор закрыт без возврата';
+      push({ kind: refunded && me === 'buyer' ? 'order_refunded' : 'dispute_resolved', title, text: d.resolution ?? t, at: d.resolvedAt, target: toDispute(o.id) });
+    }
+  }
+
+  // Плановые выплаты escrow наступают в будущем — их ещё не было.
+  return out.filter((n) => Date.parse(n.at) <= Date.now()).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 50);
 }
 
 export const mockApi: Api = {
@@ -626,6 +719,7 @@ export const mockApi: Api = {
     if (!user.name) user.name = buyer.name;
     if (!salesEnabledFor(eventById(order.event.id))) {
       order.status = 'FAILED';
+      order.endedAt = now();
       const of = db.offers.find((x) => x.id === order.offer.id);
       if (of) of.state = 'available';
       save();
@@ -749,6 +843,43 @@ export const mockApi: Api = {
     return db.sell.filter((s) => s.userId === user.id).map(toSellRequest);
   },
 
+  async cancelSellRequest(sellId) {
+    await delay(400);
+    const user = currentUser();
+    settle();
+    const s = db.sell.find((x) => x.id === sellId && x.userId === user.id);
+    if (!s) throw new ApiError('NOT_FOUND', 'Объявление не найдено', 404);
+    if (s.status === 'sold') throw new ApiError('ALREADY_SOLD', 'Билет уже купили, снять его нельзя', 409);
+    if (s.status === 'rejected' || s.status === 'cancelled') throw new ApiError('INVALID', 'Объявление уже закрыто', 409);
+    if (s.status === 'listed') {
+      const of = offerOfSale(s);
+      if (of?.state === 'reserved')
+        throw new ApiError('RESERVED', 'Покупатель сейчас оплачивает этот билет. Если он не успеет, снять можно будет через 15 минут.', 409);
+      if (of) db.offers = db.offers.filter((x) => x !== of);
+    }
+    s.status = 'cancelled';
+    s.closedAt = now();
+    db.audit.push({ at: s.closedAt, userId: user.id, action: 'sell:cancel', target: sellId, reason: '' });
+    save();
+    return toSellRequest(s);
+  },
+
+  async myNotifications() {
+    await delay(150);
+    const user = currentUser();
+    settle();
+    const seen = db.notificationsSeen[user.id] ?? '';
+    const items = notificationsOf(user).map((n, i) => ({ ...n, id: `nt_${n.kind}_${n.target.id}_${i}`, read: n.at <= seen }));
+    return { items, unread: items.filter((n) => !n.read).length };
+  },
+
+  async markNotificationsRead() {
+    await delay(100);
+    const user = currentUser();
+    db.notificationsSeen[user.id] = now();
+    save();
+  },
+
   async joinWaitlist(eventId) {
     await delay(400);
     const user = currentUser();
@@ -856,6 +987,7 @@ export const mockApi: Api = {
     } else {
       s.status = 'rejected';
       s.rejectReason = comment.trim();
+      s.closedAt = now();
     }
     db.audit.push({ at: now(), userId: admin.id, action: approve ? 'sell:approve' : 'sell:reject', target: sellId, reason: comment });
     save();

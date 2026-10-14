@@ -1,7 +1,8 @@
 import { AnimatePresence, m } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import type { User } from '../api';
+import { api, type User } from '../api';
+import { NOTIFICATIONS_READ } from '../lib/notifications';
 import { IconUser } from './icons';
 
 /**
@@ -31,6 +32,26 @@ export function ProfileMenu({ user, onLogout }: { user: User; onLogout(): void }
   // Сменили страницу — меню закрываем.
   useEffect(() => setOpen(false), [location.pathname, location.search]);
 
+  // Счётчик непрочитанных: обновляем при переходах, сбрасываем, когда ленту открыли.
+  const [unread, setUnread] = useState(0);
+  const isAdmin = user.role === 'admin';
+  useEffect(() => {
+    if (isAdmin) return;
+    let alive = true;
+    api
+      .myNotifications()
+      .then((f) => alive && setUnread(f.unread))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [isAdmin, location.pathname, location.search]);
+  useEffect(() => {
+    const reset = () => setUnread(0);
+    window.addEventListener(NOTIFICATIONS_READ, reset);
+    return () => window.removeEventListener(NOTIFICATIONS_READ, reset);
+  }, []);
+
   return (
     <div className="profile" ref={box}>
       <button
@@ -42,10 +63,11 @@ export function ProfileMenu({ user, onLogout }: { user: User; onLogout(): void }
         }}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Профиль"
+        aria-label={unread ? `Профиль, новых уведомлений: ${unread}` : 'Профиль'}
         title={user.email}
       >
         {user.email.slice(0, 1).toUpperCase()}
+        {unread > 0 && <span className="avatar__dot" aria-hidden="true" />}
       </button>
 
       <AnimatePresence>
@@ -63,10 +85,14 @@ export function ProfileMenu({ user, onLogout }: { user: User; onLogout(): void }
               <IconUser size={16} />
               {user.email}
             </div>
-            {user.role !== 'admin' && (
+            {!isAdmin && (
               <>
                 <Link to="/account?tab=tickets" role="menuitem">Мои билеты</Link>
                 <Link to="/account?tab=sell" role="menuitem">Мои продажи</Link>
+                <Link to="/account?tab=notifications" role="menuitem" className="profile__notices">
+                  Уведомления
+                  {unread > 0 && <span className="count">{unread}</span>}
+                </Link>
               </>
             )}
             <button type="button" role="menuitem" className="profile__logout" onClick={onLogout}>

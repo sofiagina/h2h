@@ -550,3 +550,30 @@ select option { background: var(--surface); color: var(--ink); }
   .profile { width: 100%; }
   .profile__menu { position: static; box-shadow: none; border: 0; padding: 0; min-width: 0; }
 }
+.avatar { position: relative; }
+.avatar__dot { position: absolute; top: 1px; right: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--bad); border: 2px solid var(--surface); }
+.profile__menu a.profile__notices { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; text-align: center; }
+
+/* Повтор покупки */
+.retry { display: grid; gap: 8px; margin-top: 14px; }
+.retry__actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: inherit; }
+.center .retry__actions { justify-content: center; }
+
+/* Снять с продажи */
+.cancel-sale { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cancel-sale p { flex-basis: 100%; margin: 0; }
+
+/* Лента уведомлений */
+.notice { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; flex-wrap: nowrap; }
+.notice__body { display: grid; gap: 2px; min-width: 0; }
+.notice__body .small { overflow-wrap: anywhere; }
+.notice__icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--bg); color: var(--ink-2); }
+.notice__icon--bad { background: var(--bad-soft); color: var(--bad); }
+.notice__at { white-space: nowrap; }
+.notice--new { border-color: var(--accent); }
+.notice--new strong::after { content: ''; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+@media (max-width: 560px) {
+  .notice { grid-template-columns: auto 1fr; }
+  .notice__at { grid-column: 2; }
+}
