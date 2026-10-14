@@ -37,8 +37,10 @@ export function Admin() {
       <div className="section__head">
         <div>
           <h1 className="h2">Админка</h1>
-          
         </div>
+        <a className="btn btn--ghost btn--sm" href={`${import.meta.env.BASE_URL}docs/api.html`} target="_blank" rel="noreferrer">
+          Контракт API
+        </a>
       </div>
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'kassa'} className={tab === 'kassa' ? 'active' : ''} onClick={() => setParams({})}>

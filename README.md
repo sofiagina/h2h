@@ -10,6 +10,13 @@
 Стек: React 19 + TypeScript + Vite, роутинг — react-router, анимации — [Motion](https://motion.dev) (грузится отдельным файлом после старта, при «уменьшить движение» в системе выключается). Стили — один `src/styles.css`.
 Светлая и тёмная темы: по умолчанию как в системе, переключатель в шапке.
 
+> **Контракт API для бэкенда (OpenAPI 3.1)**
+> - открыть в браузере: https://sofiagina.github.io/h2h/docs/api.html, на своём сервере — `/docs/api.html`, в админке — кнопка «Контракт API»;
+> - исходник: [`backend/openapi.yaml`](backend/openapi.yaml) (на сайте — `/docs/openapi.yaml`), флоу оплаты — [`backend/docs/payment-flow.md`](backend/docs/payment-flow.md);
+> - локально: `npm run dev` → http://localhost:5173/docs/api.html.
+>
+> После правки `openapi.yaml` пересобрать `backend/docs/api.html` — спека встроена в него.
+
 ## Запуск
 
 ```bash
