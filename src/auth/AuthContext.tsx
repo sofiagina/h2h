@@ -1,12 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, type User } from '../api';
+import { api, type OtpChallenge, type User } from '../api';
 import { tokenStore } from '../api/token';
 
 interface AuthState {
   user: User | null;
   ready: boolean;
-  requestCode(email: string): Promise<void>;
-  verifyCode(email: string, code: string): Promise<User>;
+  requestCode(email: string): Promise<OtpChallenge>;
+  verifyCode(challengeId: string, code: string): Promise<User>;
   logout(): void;
 }
 
@@ -30,14 +30,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const requestCode = useCallback((email: string) => api.requestCode(email), []);
 
-  const verifyCode = useCallback(async (email: string, code: string) => {
-    const session = await api.verifyCode(email, code);
-    tokenStore.set(session.accessToken);
+  const verifyCode = useCallback(async (challengeId: string, code: string) => {
+    const session = await api.verifyCode(challengeId, code);
+    tokenStore.set(session.accessToken, session.refreshToken);
     setUser(session.user);
     return session.user;
   }, []);
 
   const logout = useCallback(() => {
+    // Отзыв refresh на бэкенде читает токен сразу, до очистки; ответ не ждём.
+    void api.logout();
     tokenStore.set(null);
     setUser(null);
   }, []);

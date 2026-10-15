@@ -28,7 +28,7 @@ npm run dev
 
 Откроется http://localhost:5173. По умолчанию фронт работает на **моках в браузере** — бэкенд не нужен:
 
-- вход — любой email и код `1234`;
+- вход — любой email и код `123456`;
 - email со словом `admin` (например, `admin@example.test`) открывает админку;
 - данные хранятся в `localStorage`, кнопка «Сбросить демо-данные» в подвале возвращает исходное состояние;
 - фото в спорах в демо ужимаются до 1024 px; видео и крупные PDF сохраняются только по имени (места в браузере мало).
@@ -43,8 +43,13 @@ cp .env.example .env
 npm run dev
 ```
 
-В dev-режиме Vite проксирует `/api` на `http://localhost:8080` (порт Spring Boot по умолчанию; меняется переменной
-`H2H_BACKEND`). На проде фронт и API живут на одном домене, либо задайте `VITE_API_URL`.
+В dev-режиме Vite проксирует:
+
+- `/api/v1/auth/*` и `/api/v1/me` → сервис **identity** (репозиторий `h2h/identity`) на `http://localhost:8081`,
+  префикс `/api/v1` срезается (переменная `H2H_IDENTITY`);
+- остальное `/api` → основной бэкенд на `http://localhost:8080` (переменная `H2H_BACKEND`).
+
+На проде то же делает nginx (`backend/deploy/nginx/h2h.conf`). Фронт и API живут на одном домене, либо задайте `VITE_API_URL`.
 
 ## Что есть
 
@@ -84,16 +89,27 @@ npm run dev
 
 ## Контракт API, который ждёт фронт
 
-Базовый путь `/api/v1`, JSON, авторизация `Authorization: Bearer <access JWT>`. Refresh-токен — httpOnly-кука,
-обновление через `POST /auth/refresh`. Ошибки: HTTP-код + `{ "code": "SEAT_TAKEN", "message": "…" }` —
-`message` показывается пользователю как есть, поэтому пишется по-русски и для человека.
+Базовый путь `/api/v1`, JSON, авторизация `Authorization: Bearer <access JWT>`. Ошибки: HTTP-код +
+`{ "code": "SEAT_TAKEN", "message": "…" }` — `message` показывается пользователю как есть, поэтому пишется
+по-русски и для человека. У identity ошибки — ProblemDetail, текст в `detail`; фронт понимает оба формата.
+
+Вход — сервис identity:
 
 | Метод | Путь | Тело / ответ |
 | --- | --- | --- |
-| POST | `/auth/otp` | `{ email }` → 204 |
-| POST | `/auth/otp/verify` | `{ email, code }` → `{ accessToken, user }` |
-| POST | `/auth/refresh` | → `{ accessToken }` |
-| GET | `/users/me` | → `User` |
+| POST | `/auth/otp/request` | `{ email }` → 202 `{ challengeId, expiresAt, resendAvailableAt }` |
+| POST | `/auth/otp/verify` | `{ challengeId, code }` (6 цифр) → `{ accessToken, refreshToken, … }`; фронт затем зовёт `/me` |
+| POST | `/auth/refresh` | `{ refreshToken }` → новая пара (ротация) |
+| POST | `/auth/logout` | `{ refreshToken }` → 204 |
+| GET | `/me` | → `{ id, email, roles: ['CUSTOMER' \| 'SUPPORT' \| 'ADMIN'], … }`; `ADMIN` → роль `admin` во фронте |
+
+⚠️ Refresh сейчас в теле ответа и хранится во фронте в localStorage — **временно**. Цель — httpOnly-кука
+(`Path=/api/v1/auth`), тогда поле пропадёт из тела, а фронт продолжит работать без правок.
+
+Остальное — основной бэкенд:
+
+| Метод | Путь | Тело / ответ |
+| --- | --- | --- |
 | GET | `/events?q=&city=&group=&scope=` | → `EventItem[]`. `group` — раздел витрины: `concerts`, `festivals`, `theatre`, `standup`, `classic`, `kids`, `sport`, `club`. `scope=catalog` (по умолчанию): только предстоящие; концерты без организатора — только пока есть билеты. `scope=sell`: все предстоящие — для поиска в форме продавца |
 | GET | `/events/cities` | → `string[]` |
 | PUT · DELETE | `/events/{id}/favorite` | добавить или убрать из избранного → 204 |

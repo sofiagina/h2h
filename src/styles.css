@@ -572,6 +572,10 @@ select option { background: var(--surface); color: var(--ink); }
 .profile__menu a.profile__notices { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; text-align: center; }
 
+/* Вход */
+.login__links { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.link-btn:disabled { color: var(--ink-2); text-decoration: none; cursor: default; }
+
 /* Повтор покупки */
 .retry { display: grid; gap: 8px; margin-top: 14px; }
 .retry__actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: inherit; }

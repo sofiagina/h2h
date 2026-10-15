@@ -34,8 +34,15 @@ export default defineConfig({
   plugins: [react(), apiDocs()],
   server: {
     port: 5173,
-    // Для работы с настоящим бэком: VITE_USE_MOCK=false, запросы /api уходят на бэкенд.
+    // Для работы с настоящим бэком: VITE_USE_MOCK=false.
+    // Вход и профиль — сервис identity (у него пути без /api/v1), остальное /api — основной бэкенд.
+    // Порядок важен: первым совпавшим правилом выигрывает identity.
     proxy: {
+      '^/api/v1/(auth|me)(/|$)': {
+        target: process.env.H2H_IDENTITY ?? 'http://localhost:8081',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/v1/, ''),
+      },
       '/api': { target: process.env.H2H_BACKEND ?? 'http://localhost:8080', changeOrigin: true },
     },
   },

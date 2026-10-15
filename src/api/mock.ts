@@ -1,5 +1,5 @@
 // Мок-бэкенд в браузере: те же методы и правила, что в ТЗ, данные — в localStorage.
-// Нужен, чтобы фронт жил до готовности Java-бэкенда. Вход: любой email, код 1234;
+// Нужен, чтобы фронт жил до готовности Java-бэкенда. Вход: любой email, код 123456;
 // email со словом "admin" получает роль администратора.
 //
 // Модель как у TicketSwap: покупатель платит нам, организатор перевыпускает билет,
@@ -37,7 +37,12 @@ import {
 const KEY = 'h2h.mock.v3';
 const LEGACY_KEY = 'h2h.mock.v2';
 const RESERVE_MINUTES = 15;
-const MOCK_CODE = '1234';
+const MOCK_CODE = '123456';
+const CODE_TTL_MS = 10 * 60_000;
+const RESEND_MS = 60_000;
+
+/** Выданные коды: как в identity, проверяем по challengeId. Живут только до перезагрузки вкладки. */
+const challenges = new Map<string, { email: string; expiresAt: number }>();
 const ISSUE_AFTER_MS = 2500;
 const LIST_AFTER_MS = 3000;
 const DAY = 24 * 3600_000;
@@ -625,20 +630,31 @@ function notificationsOf(user: User): Draft[] {
 export const mockApi: Api = {
   async requestCode(email) {
     await delay();
-    if (!EMAIL_RE.test(email)) throw new ApiError('INVALID_EMAIL', 'Проверьте email');
+    if (!EMAIL_RE.test(email)) throw new ApiError('validation_failed', 'Проверьте email');
+    const challengeId = id('otp');
+    const t = Date.now();
+    challenges.set(challengeId, { email, expiresAt: t + CODE_TTL_MS });
+    return { challengeId, expiresAt: iso(new Date(t + CODE_TTL_MS)), resendAvailableAt: iso(new Date(t + RESEND_MS)) };
   },
 
-  async verifyCode(email, code) {
+  async verifyCode(challengeId, code) {
     await delay(400);
-    if (code !== MOCK_CODE) throw new ApiError('INVALID_CODE', 'Неверный код. В демо-режиме код — 1234');
-    const normalized = email.trim().toLowerCase();
+    const challenge = challenges.get(challengeId);
+    if (!challenge || challenge.expiresAt < Date.now() || code !== MOCK_CODE)
+      throw new ApiError('invalid_code', 'Код неверный или истёк. В демо-режиме код — 123456');
+    challenges.delete(challengeId);
+    const normalized = challenge.email.trim().toLowerCase();
     let user = db.users.find((u) => u.email === normalized);
     if (!user) {
       user = { id: id('u'), email: normalized, name: '', role: normalized.includes('admin') ? 'admin' : 'customer' };
       db.users.push(user);
       save();
     }
-    return { accessToken: `mock.${user.id}`, user };
+    return { accessToken: `mock.${user.id}`, refreshToken: null, user };
+  },
+
+  async logout() {
+    await delay(100);
   },
 
   async me() {
