@@ -3,6 +3,7 @@ import { m } from 'motion/react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, type Order, type OrderStatus } from '../api';
 import { Composer } from '../components/DisputeThread';
+import { RetryPurchase } from '../components/RetryPurchase';
 import { DisputeBadge, ErrorBox, OrderBadge, Spinner, TicketCode } from '../components/ui';
 import { dateLong, dateTime, money, seatLabel } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
@@ -70,6 +71,7 @@ export function OrderPage() {
         )}
         {o.status === 'REFUNDED' && !o.dispute && <div className="alert alert--warn">Деньги возвращены на карту, с которой вы платили.</div>}
         {o.status === 'EXPIRED' && <div className="alert alert--warn">Бронь истекла, оплата не проводилась.</div>}
+        {(o.status === 'FAILED' || o.status === 'EXPIRED') && <RetryPurchase order={o} />}
 
         {o.status === 'ISSUED' &&
           o.tickets.map((t) => (

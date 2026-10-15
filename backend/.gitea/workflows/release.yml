@@ -1,0 +1,65 @@
+# Образ и деплой: только из main и только после зелёного CI.
+# Нужные секреты репозитория — в deploy/README.md.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: git.tunele.ru
+  IMAGE: git.tunele.ru/h2h/h2h-core
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Проверить, есть ли проект Maven
+        id: guard
+        run: |
+          if [ -f pom.xml ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "pom.xml ещё нет — образ не собираем"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.guard.outputs.ready == 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      # Два тега: latest для деплоя и sha, чтобы можно было откатиться на конкретный коммит.
+      - uses: docker/build-push-action@v6
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+
+      # Сервер сам забирает новый образ и перезапускает контейнер.
+      - name: Деплой на сервер
+        if: steps.guard.outputs.ready == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/h2h
+            docker compose pull app
+            docker compose up -d app
+            docker image prune -f

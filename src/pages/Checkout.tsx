@@ -2,6 +2,7 @@ import { useCallback, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, type Buyer } from '../api';
 import { useAuth } from '../auth/AuthContext';
+import { RetryPurchase } from '../components/RetryPurchase';
 import { Countdown, ErrorBox, Spinner } from '../components/ui';
 import { dateLong, money, seatLabel } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
@@ -45,8 +46,8 @@ export function Checkout() {
           {o.status === 'EXPIRED' ? (
             <>
               <h2>Время брони вышло</h2>
-              <p className="muted">Билет вернулся в продажу.</p>
-              <Link className="btn btn--primary" to={`/events/${o.event.id}`}>К концерту</Link>
+              <p className="muted">Оплата не проводилась. Билет можно забронировать заново, если его ещё не забрали.</p>
+              <RetryPurchase order={o} />
             </>
           ) : (
             <>

@@ -57,6 +57,7 @@ const SELL: Record<SellStatus, [string, Tone]> = {
   listed: ['В продаже', 'info'],
   sold: ['Продан', 'ok'],
   rejected: ['Отклонено', 'bad'],
+  cancelled: ['Снято с продажи', 'muted'],
 };
 export const SellBadge = ({ status }: { status: SellStatus }) => <Badge label={SELL[status][0]} tone={SELL[status][1]} />;
 

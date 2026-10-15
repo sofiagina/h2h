@@ -3,6 +3,7 @@ import { AnimatePresence, m } from 'motion/react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api, USE_MOCK, type EventItem, type PayoutInput, type PayoutMethod, type SellRequest } from '../api';
 import { useAuth } from '../auth/AuthContext';
+import { Select } from '../components/Select';
 import { ErrorBox, GuaranteeNote, Spinner } from '../components/ui';
 import { dateLong, money, seatLabel } from '../lib/format';
 import { spring, stepSlide } from '../lib/motion';
@@ -76,6 +77,8 @@ export function Sell() {
 
   if (!ready) return <div className="container section"><Spinner /></div>;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  // Админ — модератор, не продавец: продажа ему недоступна.
+  if (user.role === 'admin') return <Navigate to="/admin" replace />;
 
   const set = (k: keyof Form) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value });
   const noOrganizer = custom || (event !== null && !event.organizerConnected);
@@ -282,13 +285,16 @@ export function Sell() {
             {method === 'sbp' && (
               <>
                 <label className="field"><span>Телефон, привязанный к СБП</span><input className="input" type="tel" value={form.phone} onChange={set('phone')} placeholder="+7 900 000-00-00" /></label>
-                <label className="field">
+                <div className="field">
                   <span>Банк</span>
-                  <select className="input" value={form.bank} onChange={set('bank')}>
-                    <option value="">Выберите банк</option>
-                    {BANKS.map((b) => <option key={b}>{b}</option>)}
-                  </select>
-                </label>
+                  <Select
+                    label="Банк"
+                    placeholder="Выберите банк"
+                    value={form.bank}
+                    onChange={(bank) => setForm({ ...form, bank })}
+                    options={BANKS.map((b) => ({ value: b, label: b }))}
+                  />
+                </div>
               </>
             )}
             {method === 'card' && (

@@ -10,6 +10,15 @@
 Стек: React 19 + TypeScript + Vite, роутинг — react-router, анимации — [Motion](https://motion.dev) (грузится отдельным файлом после старта, при «уменьшить движение» в системе выключается). Стили — один `src/styles.css`.
 Светлая и тёмная темы: по умолчанию как в системе, переключатель в шапке.
 
+> **Контракт API для бэкенда (OpenAPI 3.1)**
+> - исходник: [`backend/openapi.yaml`](backend/openapi.yaml), флоу оплаты — [`backend/docs/payment-flow.md`](backend/docs/payment-flow.md);
+> - красиво (Redoc): `npm run dev` → http://localhost:5173/docs/api.html, или скачать [`backend/docs/api.html`](backend/docs/api.html) и открыть двойным кликом;
+> - в админке — кнопка «Контракт API» (ведёт в репозиторий, нужен доступ).
+>
+> На публичный сайт контракт не выкладывается — только dev-сервер и репозиторий.
+>
+> После правки `openapi.yaml` пересобрать `backend/docs/api.html` — спека встроена в него.
+
 ## Запуск
 
 ```bash
@@ -100,6 +109,9 @@ npm run dev
 | POST | `/orders/{id}/dispute/messages` | **multipart**: `text`, `files[]` → `DisputeView` |
 | GET | `/users/me/orders` · `/users/me/sell-requests` · `/users/me/waitlist` | списки для кабинета |
 | POST | `/sell-requests` | **multipart**: `data` (JSON `SellRequestInput` без файла; `eventId` **или** `newEvent`; `payout` — `{ method: 'sbp', phone, bank }` · `{ method: 'card', cardToken, cardLast4 }` · `{ method: 'account', holder, bik, account }`), `ticketFile` → `SellRequest` |
+| POST | `/sell-requests/{id}/cancel` | снять своё объявление, пока билет не купили → `SellRequest` (`status: cancelled`); `409 ALREADY_SOLD` / `RESERVED` (билет сейчас оплачивают) / `INVALID` (уже закрыто) |
+| GET | `/users/me/notifications` | → `{ items: AppNotification[], unread }`: оплата, билет готов, не удалось, бронь истекла, в продаже, отклонено, снято, продано, выплата, спор; новые сверху, до 50 |
+| POST | `/users/me/notifications/read` | всё прочитано → 204 |
 | GET | `/admin/aggregators` | → `Aggregator[]` с последними 24 проверками |
 | PATCH | `/admin/aggregators/{id}` | `{ mode, reason }` → `Aggregator` (пишется в журнал действий) |
 | POST | `/admin/aggregators/{id}/check` | внеочередная проверка → `Aggregator` |

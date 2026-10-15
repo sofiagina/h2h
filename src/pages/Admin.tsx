@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api, type AdminSellRequest, type Aggregator, type AggregatorMode } from '../api';
 import { useAuth } from '../auth/AuthContext';
+import { Select } from '../components/Select';
 import { AggBadge, DisputeBadge, ErrorBox, OrderBadge, SellBadge, Spinner } from '../components/ui';
 import { dateLong, dateTime, money, seatLabel } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
@@ -12,7 +13,11 @@ const MODES: Record<AggregatorMode, string> = {
   force_off: 'Принудительно выключено',
 };
 
-const salesOn = (a: Aggregator) => a.mode === 'force_on' || (a.mode === 'auto' && a.status === 'UP');
+const API_DOCS_URL = import.meta.env.DEV
+  ? '/docs/api.html'
+  : 'https://git.tunele.ru/h2h/Front-AdminPanel/src/branch/main/backend/openapi.yaml';
+
+const salesOn =(a: Aggregator) => a.mode === 'force_on' || (a.mode === 'auto' && a.status === 'UP');
 
 export function Admin() {
   const { user, ready } = useAuth();
@@ -37,8 +42,11 @@ export function Admin() {
       <div className="section__head">
         <div>
           <h1 className="h2">Админка</h1>
-          
         </div>
+        {/* Контракт не публикуем на сайте: локально — dev-сервер, иначе — закрытый репозиторий. */}
+        <a className="btn btn--ghost btn--sm" href={API_DOCS_URL} target="_blank" rel="noreferrer">
+          Контракт API
+        </a>
       </div>
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'kassa'} className={tab === 'kassa' ? 'active' : ''} onClick={() => setParams({})}>
@@ -133,14 +141,15 @@ function AggregatorCard({ initial }: { initial: Aggregator }) {
         {salesOn(a) ? 'Продажи открыты' : 'Продажи закрыты'}
       </div>
 
-      <label className="field">
+      <div className="field">
         <span>Режим продаж</span>
-        <select className="input" value={mode} onChange={(e) => setMode(e.target.value as AggregatorMode)}>
-          {Object.entries(MODES).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
-        </select>
-      </label>
+        <Select
+          label="Режим продаж"
+          value={mode}
+          onChange={(v) => setMode(v as AggregatorMode)}
+          options={Object.entries(MODES).map(([value, label]) => ({ value, label }))}
+        />
+      </div>
       {mode !== a.mode && (
         <label className="field">
           <span>Причина (попадёт в журнал)</span>

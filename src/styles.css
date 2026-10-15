@@ -134,6 +134,25 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
   background: var(--surface); font: inherit; color: var(--ink); outline: none; transition: border-color .15s, box-shadow .15s;
 }
 .input:focus { border-color: var(--info); box-shadow: 0 0 0 3px rgb(47 73 209 / 12%); }
+/* Выпадающий список (components/Select.tsx) */
+.select { position: relative; }
+.select__button { display: flex; align-items: center; gap: 8px; width: 100%; font: inherit; color: var(--ink); cursor: pointer; text-align: left; }
+.select__button > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select__placeholder { color: var(--ink-2); }
+.select__chevron { flex: none; color: var(--ink-2); transition: transform .18s; }
+.select--open .select__chevron { transform: rotate(180deg); }
+.select--field .select__button { padding: 11px 13px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); outline: none; transition: border-color .15s, box-shadow .15s; }
+.select--field .select__button:focus-visible, .select--field.select--open .select__button { border-color: var(--info); box-shadow: 0 0 0 3px rgb(47 73 209 / 12%); }
+.select--inline .select__button { padding: 6px 8px; border: 0; border-radius: 8px; background: none; font-weight: 600; color: var(--ink); }
+.select--inline .select__button svg:first-child { color: var(--ink-2); }
+.select--inline .select__button:hover, .select--inline.select--open .select__button { background: var(--bg); }
+.select--inline .select__button:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.select__list { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 40; min-width: 200px; max-height: 280px; overflow-y: auto; margin: 0; padding: 6px; list-style: none; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.select--inline .select__list { left: auto; right: 0; }
+.select__option { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer; color: var(--ink); font-weight: 500; }
+.select__option.is-active { background: var(--bg); }
+.select__option.is-selected { color: var(--accent); font-weight: 700; }
+
 .input--code { font-size: 24px; letter-spacing: .4em; text-align: center; font-weight: 700; }
 textarea.input { resize: vertical; }
 .field { display: grid; gap: 6px; margin-bottom: 14px; }
@@ -429,8 +448,6 @@ a.item:hover { border-color: var(--line-strong); }
 .subnav__tabs { display: flex; gap: 8px; }
 .subnav__tabs button { border: 0; background: none; font: inherit; font-weight: 700; color: var(--ink-2); padding: 16px 10px 13px; border-bottom: 3px solid transparent; cursor: pointer; }
 .subnav__tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
-.city-select { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-weight: 600; }
-.city-select select { border: 0; background: none; font: inherit; color: var(--ink); cursor: pointer; padding: 6px 2px; }
 
 /* Блоки витрины */
 .block { margin-bottom: 40px; }
@@ -534,4 +551,46 @@ a.item:hover { border-color: var(--line-strong); }
   .banner { grid-template-columns: 1fr; padding-right: 22px; }
   .banner__icon { display: none; }
   .nav__icon { width: auto; height: auto; justify-content: start; padding: 12px 14px; border-radius: 8px; }
+}
+
+/* Пункты выпадающих списков: иначе в тёмной теме светлый текст на белом */
+select option { background: var(--surface); color: var(--ink); }
+
+/* Меню профиля */
+.profile { position: relative; }
+.profile__menu { position: absolute; top: calc(100% + 8px); right: 0; min-width: 220px; z-index: 30; display: grid; padding: 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.profile__email { display: flex; align-items: center; gap: 8px; padding: 8px 10px 10px; color: var(--ink-2); font-size: 13px; border-bottom: 1px solid var(--line); margin-bottom: 4px; overflow-wrap: anywhere; }
+.profile__menu a, .profile__logout { display: block; width: 100%; text-align: left; padding: 10px; border: 0; background: none; font: inherit; color: var(--ink); text-decoration: none; border-radius: 8px; cursor: pointer; }
+.profile__menu a:hover, .profile__logout:hover { background: var(--bg); }
+.profile__logout { color: var(--bad); font-weight: 600; margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; }
+@media (max-width: 720px) {
+  .profile { width: 100%; }
+  .profile__menu { position: static; box-shadow: none; border: 0; padding: 0; min-width: 0; }
+}
+.avatar { position: relative; }
+.avatar__dot { position: absolute; top: 1px; right: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--bad); border: 2px solid var(--surface); }
+.profile__menu a.profile__notices { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; text-align: center; }
+
+/* Повтор покупки */
+.retry { display: grid; gap: 8px; margin-top: 14px; }
+.retry__actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: inherit; }
+.center .retry__actions { justify-content: center; }
+
+/* Снять с продажи */
+.cancel-sale { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cancel-sale p { flex-basis: 100%; margin: 0; }
+
+/* Лента уведомлений */
+.notice { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; flex-wrap: nowrap; }
+.notice__body { display: grid; gap: 2px; min-width: 0; }
+.notice__body .small { overflow-wrap: anywhere; }
+.notice__icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--bg); color: var(--ink-2); }
+.notice__icon--bad { background: var(--bad-soft); color: var(--bad); }
+.notice__at { white-space: nowrap; }
+.notice--new { border-color: var(--accent); }
+.notice--new strong::after { content: ''; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+@media (max-width: 560px) {
+  .notice { grid-template-columns: auto 1fr; }
+  .notice__at { grid-column: 2; }
 }
