@@ -5,6 +5,7 @@ import { api, type EventGroup, type EventItem } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { Carousel, EventLine, EventTile } from '../components/Discovery';
 import { IconArrowRight, IconClose, IconPin, IconSearch, IconSparkle } from '../components/icons';
+import { Select } from '../components/Select';
 import { Empty, ErrorBox, Spinner } from '../components/ui';
 import { CATEGORIES, categoryOf } from '../lib/categories';
 import { cover } from '../lib/format';
@@ -88,13 +89,14 @@ export function Home() {
               Избранное
             </button>
           </div>
-          <label className="city-select">
-            <IconPin size={18} />
-            <select value={city} onChange={(e) => setParam({ city: e.target.value })} aria-label="Город">
-              <option value="">Все города</option>
-              {cities.data?.map((c) => <option key={c}>{c}</option>)}
-            </select>
-          </label>
+          <Select
+            variant="inline"
+            label="Город"
+            icon={<IconPin size={18} />}
+            value={city}
+            onChange={(v) => setParam({ city: v })}
+            options={[{ value: '', label: 'Все города' }, ...(cities.data ?? []).map((c) => ({ value: c, label: c }))]}
+          />
         </div>
       </div>
 

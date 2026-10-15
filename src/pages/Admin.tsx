@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api, type AdminSellRequest, type Aggregator, type AggregatorMode } from '../api';
 import { useAuth } from '../auth/AuthContext';
+import { Select } from '../components/Select';
 import { AggBadge, DisputeBadge, ErrorBox, OrderBadge, SellBadge, Spinner } from '../components/ui';
 import { dateLong, dateTime, money, seatLabel } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
@@ -140,14 +141,15 @@ function AggregatorCard({ initial }: { initial: Aggregator }) {
         {salesOn(a) ? 'Продажи открыты' : 'Продажи закрыты'}
       </div>
 
-      <label className="field">
+      <div className="field">
         <span>Режим продаж</span>
-        <select className="input" value={mode} onChange={(e) => setMode(e.target.value as AggregatorMode)}>
-          {Object.entries(MODES).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
-        </select>
-      </label>
+        <Select
+          label="Режим продаж"
+          value={mode}
+          onChange={(v) => setMode(v as AggregatorMode)}
+          options={Object.entries(MODES).map(([value, label]) => ({ value, label }))}
+        />
+      </div>
       {mode !== a.mode && (
         <label className="field">
           <span>Причина (попадёт в журнал)</span>
