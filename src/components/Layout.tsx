@@ -110,7 +110,7 @@ export function Layout() {
           </nav>
           {USE_MOCK && (
             <div className="demo-note small">
-              Демо: вход по любому email с кодом 1234, email со словом admin открывает админку.
+              Демо: вход по любому email с кодом 123456, email со словом admin открывает админку.
               <button
                 className="link-btn"
                 onClick={() => {

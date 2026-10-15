@@ -1,5 +1,5 @@
 import { tokenStore } from './token';
-import { ApiError, type Api, type Session } from './types';
+import { ApiError, type Api, type OtpChallenge, type User } from './types';
 
 const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api/v1`;
 
@@ -11,16 +11,62 @@ interface ReqOptions {
   retried?: boolean;
 }
 
-async function refresh(): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/auth/refresh`, { method: 'POST', credentials: 'include' });
-    if (!res.ok) return false;
-    const data = (await res.json()) as { accessToken: string };
-    tokenStore.set(data.accessToken);
-    return true;
-  } catch {
-    return false;
-  }
+/** Ответ identity на вход и обновление. refreshToken в теле — временно, до перехода на куку. */
+interface TokenResponse {
+  accessToken: string;
+  refreshToken?: string | null;
+}
+
+/** GET /me сервиса identity. */
+interface MeResponse {
+  id: string;
+  email: string;
+  roles: string[];
+}
+
+/** Роли identity: CUSTOMER, SUPPORT, ADMIN. Админка фронта — только для ADMIN. */
+const toUser = (m: MeResponse): User => ({
+  id: m.id,
+  email: m.email,
+  name: '',
+  role: m.roles.includes('ADMIN') ? 'admin' : 'customer',
+});
+
+/** Тело для refresh/logout: пока identity ждёт токен в JSON; с кукой тела не будет. */
+function refreshBody(): { headers: Record<string, string>; body?: string } {
+  const token = tokenStore.getRefresh();
+  return token
+    ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: token }) }
+    : { headers: {} };
+}
+
+/** Один refresh на всех: параллельные 401 не должны тратить один и тот же токен дважды. */
+let refreshing: Promise<boolean> | null = null;
+
+function refresh(): Promise<boolean> {
+  refreshing ??= (async () => {
+    try {
+      const res = await fetch(`${BASE}/auth/refresh`, { method: 'POST', credentials: 'include', ...refreshBody() });
+      if (!res.ok) return false;
+      const data = (await res.json()) as TokenResponse;
+      tokenStore.set(data.accessToken, data.refreshToken ?? undefined);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshing = null;
+    }
+  })();
+  return refreshing;
+}
+
+/**
+ * Текст ошибки для человека. Основной бэкенд отвечает {code, message},
+ * identity — ProblemDetail (RFC 9457): {code, detail, errors?: {поле: текст}}.
+ */
+function errorText(data: { message?: string; detail?: string; errors?: Record<string, string> } | null) {
+  const field = data?.errors && Object.values(data.errors)[0];
+  return field || data?.message || data?.detail || 'Что-то пошло не так. Попробуйте позже.';
 }
 
 async function req<T>(method: string, path: string, opts: ReqOptions = {}): Promise<T> {
@@ -48,7 +94,7 @@ async function req<T>(method: string, path: string, opts: ReqOptions = {}): Prom
     return req<T>(method, path, { ...opts, retried: true });
   }
   if (!res.ok) {
-    let data: { code?: string; message?: string } | null = null;
+    let data: { code?: string; message?: string; detail?: string; errors?: Record<string, string> } | null = null;
     try {
       data = await res.json();
     } catch {
@@ -56,7 +102,7 @@ async function req<T>(method: string, path: string, opts: ReqOptions = {}): Prom
     }
     if (res.status === 401) tokenStore.set(null);
     if (res.status === 413) throw new ApiError('TOO_LARGE', 'Файлы слишком большие — уменьшите их или загрузите по одному.', 413);
-    throw new ApiError(data?.code ?? `HTTP_${res.status}`, data?.message ?? 'Что-то пошло не так. Попробуйте позже.', res.status);
+    throw new ApiError(data?.code ?? `HTTP_${res.status}`, errorText(data), res.status);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -76,9 +122,23 @@ function disputeForm(text: string, files: File[]) {
 }
 
 export const httpApi: Api = {
-  requestCode: (email) => req('POST', '/auth/otp', { body: { email } }),
-  verifyCode: (email, code) => req<Session>('POST', '/auth/otp/verify', { body: { email, code } }),
-  me: () => req('GET', '/users/me'),
+  // Сервис identity: пути /api/v1/auth/* и /api/v1/me прокси (vite, nginx) отправляет на него.
+  requestCode: (email) => req<OtpChallenge>('POST', '/auth/otp/request', { body: { email } }),
+  verifyCode: async (challengeId, code) => {
+    const t = await req<TokenResponse>('POST', '/auth/otp/verify', { body: { challengeId, code } });
+    // /me нужен уже с новым токеном.
+    tokenStore.set(t.accessToken, t.refreshToken ?? null);
+    const user = toUser(await req<MeResponse>('GET', '/me'));
+    return { accessToken: t.accessToken, refreshToken: t.refreshToken ?? null, user };
+  },
+  me: async () => toUser(await req<MeResponse>('GET', '/me')),
+  logout: async () => {
+    try {
+      await fetch(`${BASE}/auth/logout`, { method: 'POST', credentials: 'include', ...refreshBody() });
+    } catch {
+      /* нет связи — локально всё равно выходим */
+    }
+  },
 
   listEvents: (f = {}) => req('GET', `/events${qs({ q: f.q, city: f.city, group: f.group, scope: f.scope })}`),
   listCities: () => req('GET', '/events/cities'),

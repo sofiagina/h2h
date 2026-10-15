@@ -266,7 +266,16 @@ export interface User {
 
 export interface Session {
   accessToken: string;
+  /** Временно, пока identity отдаёт refresh в теле. После перехода на httpOnly-куку — null. */
+  refreshToken: string | null;
   user: User;
+}
+
+/** Ответ на запрос кода: по challengeId код проверяется, раньше resendAvailableAt повторно не отправить. */
+export interface OtpChallenge {
+  challengeId: string;
+  expiresAt: string;
+  resendAvailableAt: string;
 }
 
 export interface HealthCheck {
@@ -317,9 +326,13 @@ export const DISPUTE_FILES = {
 } as const;
 
 export interface Api {
-  requestCode(email: string): Promise<void>;
-  verifyCode(email: string, code: string): Promise<Session>;
+  // Вход — сервис identity (POST /auth/otp/request, /auth/otp/verify, /auth/refresh, /auth/logout, GET /me).
+  requestCode(email: string): Promise<OtpChallenge>;
+  /** Код — 6 цифр из письма. */
+  verifyCode(challengeId: string, code: string): Promise<Session>;
   me(): Promise<User>;
+  /** Отзывает refresh-токен на бэкенде. Ошибки не критичны: локально выходим в любом случае. */
+  logout(): Promise<void>;
 
   listEvents(filter?: EventFilter): Promise<EventItem[]>;
   listCities(): Promise<string[]>;
