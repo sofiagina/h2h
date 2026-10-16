@@ -70,7 +70,7 @@ export function HomePage() {
         <div className="hero__lights" aria-hidden />
         <div className="container hero__inner">
           <m.h1 initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-            Билеты от зрителей. По номиналу.
+            Билеты от зрителей. Не дороже номинала.
           </m.h1>
           <form className="hero__search" onSubmit={search} role="search">
             <IconSearch size={20} />

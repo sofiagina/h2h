@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
-import { api, type AppNotification, type NotificationKind, type PayoutMethodInfo, type SellStatus } from '@/core/api';
+import { api, type AppNotification, type NotificationKind, type PayoutMethodInfo, type PayoutStatus, type SellStatus } from '@/core/api';
 import { PayoutForm } from './PayoutForm';
 import { useAuth } from '@/core/auth/AuthContext';
 import { IconBell, IconCalendar, IconChat, IconShield, IconSwap, IconTicket, IconWallet } from '@/shared/ui/icons';
 import { NOTIFICATIONS_READ } from '@/shared/lib/notifications';
 import { DisputeBadge, Empty, ErrorBox, OrderBadge, PayoutBadge, SellBadge, Spinner } from '@/shared/ui';
-import { dateLong, dateTime, money, seatLabel } from '@/shared/lib/format';
+import { dateLong, dateTime, money, plural, seatLabel } from '@/shared/lib/format';
 import { useAsync } from '@/shared/lib/useAsync';
 
 const TABS = [
@@ -146,31 +146,85 @@ function SellList() {
 
 const METHOD_TITLE = { sbp: 'СБП', card: 'Карта', account: 'Счёт' } as const;
 
-/** Реквизиты выплаты — одни на все продажи. */
+/** Что продавец видит по каждой выплате: когда и почему. */
+const PAYOUT_HINT: Record<PayoutStatus, string> = {
+  waiting: 'Билет ещё не купили',
+  no_details: 'Билет продан — добавьте реквизиты, и деньги уйдут',
+  scheduled: 'Деньги уйдут по графику',
+  sent: 'Деньги отправлены',
+  frozen: 'Покупатель открыл спор — выплата на паузе до решения',
+  cancelled: 'Выплаты не будет',
+};
+
+/** Реквизиты выплаты и список выплат по продажам. */
 function PayoutSettings() {
   const current = useAsync(() => api.myPayoutMethod(), []);
+  const sales = useAsync(() => api.mySellRequests(), []);
   const [saved, setSaved] = useState<PayoutMethodInfo | null>(null);
   if (current.error) return <ErrorBox error={current.error} onRetry={() => current.reload()} />;
   // null в data — и «ещё грузится», и «реквизитов нет»: различаем по loading.
   if (current.loading && !current.data) return <Spinner />;
   const info = saved ?? current.data;
+  const payouts = (sales.data ?? []).filter((s) => s.payout.status !== 'cancelled');
+  // Пока деньги уже назначены к отправке, реквизиты не меняем: это защита от угона аккаунта.
+  const inProgress = payouts.filter((s) => s.payout.status === 'scheduled');
+
   return (
-    <div className="panel narrow-panel">
-      <h2 className="h3">Куда переводить деньги</h2>
-      {info ? (
-        <p className="payout-current">
-          <span className="badge badge--ok">{METHOD_TITLE[info.method]}</span> {info.details}
-          <span className="muted small"> · изменено {dateTime(info.updatedAt)}</span>
-        </p>
-      ) : (
-        <p className="muted">
-          Реквизиты ещё не указаны. Продавать можно и без них, но деньги за проданный билет придут только после того, как вы их
-          добавите.
-        </p>
+    <>
+      <div className="panel narrow-panel">
+        <h2 className="h3">Куда переводить деньги</h2>
+        {info ? (
+          <p className="payout-current">
+            <span className="badge badge--ok">{METHOD_TITLE[info.method]}</span> {info.details}
+            <span className="muted small"> · изменено {dateTime(info.updatedAt)}</span>
+          </p>
+        ) : (
+          <p className="muted">
+            Реквизиты ещё не указаны. Продавать можно и без них, но деньги за проданный билет придут только после того, как вы их
+            добавите.
+          </p>
+        )}
+        {saved && <p className="ok-text small">Сохранено. Ждущие выплаты уйдут по этим реквизитам.</p>}
+        {inProgress.length ? (
+          <div className="alert alert--warn">
+            <b>Реквизиты сейчас не изменить</b>
+            <p className="small">
+              {plural(inProgress.length, 'Выплата', 'Выплаты', 'Выплаты')} уже в работе
+              {inProgress[0].payout.at && `, ближайшая ${dateTime(inProgress[0].payout.at)}`}. Так деньги не уведут, если
+              кто-то получит доступ к аккаунту. Поменять реквизиты можно будет сразу после перевода — или напишите в поддержку,
+              если ошиблись в них.
+            </p>
+          </div>
+        ) : (
+          <PayoutForm current={info} onSaved={setSaved} />
+        )}
+      </div>
+
+      <h2 className="h3 mt">Выплаты по продажам</h2>
+      {sales.error && <ErrorBox error={sales.error} onRetry={() => sales.reload()} />}
+      {!sales.data && !sales.error && <Spinner />}
+      {sales.data && !payouts.length && <p className="muted">Выплат пока нет: как только билет купят, здесь появится статус.</p>}
+      {payouts.length > 0 && (
+        <ul className="items">
+          {payouts.map((s) => (
+            <li key={s.id} className="item">
+              <div>
+                <strong>{s.event.title}</strong>
+                <span className="muted small">{seatLabel(s.seat)}</span>
+                <span className="muted small">
+                  {PAYOUT_HINT[s.payout.status]}
+                  {s.payout.at && ` · ${s.payout.status === 'sent' ? 'отправлено' : 'план'} ${dateTime(s.payout.at)}`}
+                </span>
+              </div>
+              <div className="item__right">
+                <span className="price">{money(s.faceValue)}</span>
+                <PayoutBadge status={s.payout.status} />
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
-      {saved && <p className="ok-text small">Сохранено. Ждущие выплаты уйдут по этим реквизитам.</p>}
-      <PayoutForm current={info} onSaved={setSaved} />
-    </div>
+    </>
   );
 }
 

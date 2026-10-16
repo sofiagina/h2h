@@ -4,10 +4,11 @@ import { Select } from '@/shared/ui/Select';
 import { ErrorBox } from '@/shared/ui';
 
 const BANKS = ['Сбербанк', 'Т-Банк', 'ВТБ', 'Альфа-Банк', 'Газпромбанк', 'Райффайзенбанк', 'Озон Банк', 'Другой банк'];
+// Карта первая и по умолчанию: её платёжный сервис выплачивает точно, остальное уточняем.
 const METHODS: [PayoutMethod, string, string][] = [
+  ['card', 'Карта', 'обычно в тот же день'],
   ['sbp', 'СБП', 'по номеру телефона'],
-  ['card', 'Карта', 'любого банка'],
-  ['account', 'Счёт', 'по реквизитам'],
+  ['account', 'Счёт', '1–3 рабочих дня'],
 ];
 
 const digits = (v: string) => v.replace(/\D/g, '');
@@ -25,7 +26,7 @@ const formatCard = (v: string) => digits(v).slice(0, 19).replace(/(\d{4})(?=\d)/
 
 /** Куда переводить деньги за проданные билеты. Один способ на аккаунт, меняется в профиле. */
 export function PayoutForm({ current, onSaved }: { current: PayoutMethodInfo | null; onSaved(info: PayoutMethodInfo): void }) {
-  const [method, setMethod] = useState<PayoutMethod>(current?.method ?? 'sbp');
+  const [method, setMethod] = useState<PayoutMethod>(current?.method ?? 'card');
   const [f, setF] = useState({ phone: '', bank: '', card: '', holder: '', bik: '', account: '' });
   const [problem, setProblem] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -133,6 +134,10 @@ export function PayoutForm({ current, onSaved }: { current: PayoutMethodInfo | n
       )}
       {problem && <p className="field-error">{problem}</p>}
       {error && <ErrorBox error={error} />}
+      <p className="muted small">
+        Пока деньги не отправлены, реквизиты можно менять. Как только выплата уйдёт в работу, поле закроется — так деньги не
+        уведут, если кто-то получит доступ к аккаунту.
+      </p>
       <div className="actions">
         <button className="btn btn--primary" disabled={busy}>{busy ? 'Сохраняем…' : current ? 'Заменить реквизиты' : 'Сохранить'}</button>
       </div>

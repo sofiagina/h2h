@@ -1210,6 +1210,14 @@ export const mockApi: Api = {
   async setPayoutMethod(input) {
     await delay(400);
     const user = currentUser();
+    // Пока деньги уже назначены к отправке, реквизиты не меняем: защита от угона аккаунта.
+    const busy = db.sell.find((s) => s.userId === user.id && payoutOf(s).status === 'scheduled');
+    if (busy)
+      throw new ApiError(
+        'PAYOUT_IN_PROGRESS',
+        `Выплата за «${busy.event.title}» уже в работе, реквизиты сейчас не изменить. Попробуйте после перевода или напишите в поддержку.`,
+        409,
+      );
     const info: PayoutMethodInfo = { method: input.method, details: describePayout(input), updatedAt: now() };
     db.payoutMethods[user.id] = info;
     db.audit.push({ at: info.updatedAt, userId: user.id, action: 'payout:set', target: user.id, reason: info.method });
