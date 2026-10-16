@@ -4,6 +4,7 @@ import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api, USE_MOCK, type EventItem, type PayoutInput, type PayoutMethod, type SellRequest } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { Select } from '../components/Select';
+import { checkSourceUrl, orderNumberProblem, TICKET_SELLERS } from '../lib/sourceCheck';
 import { ErrorBox, GuaranteeNote, Spinner } from '../components/ui';
 import { dateLong, money, seatLabel } from '../lib/format';
 import { spring, stepSlide } from '../lib/motion';
@@ -31,7 +32,7 @@ function luhn(num: string) {
 const formatCard = (v: string) => digits(v).slice(0, 19).replace(/(\d{4})(?=\d)/g, '$1 ');
 
 const EMPTY = {
-  orderNumber: '', purchaseEmail: '', boughtAt: '', sector: '', row: '', place: '', faceValue: '',
+  orderNumber: '', purchaseEmail: '', boughtAt: '', boughtOther: '', sector: '', row: '', place: '', faceValue: '',
   title: '', city: '', venue: '', startsAt: '', sourceUrl: '', phone: '', bank: '',
   card: '', holder: '', bik: '', account: '',
 };
@@ -82,15 +83,20 @@ export function Sell() {
 
   const set = (k: keyof Form) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value });
   const noOrganizer = custom || (event !== null && !event.organizerConnected);
+  const source = form.sourceUrl.trim() ? checkSourceUrl(form.sourceUrl) : null;
 
   function check(s: number): string | null {
     if (s === 0) {
       if (!event && !custom) return 'Выберите концерт или добавьте свой';
       if (custom && (!form.title.trim() || !form.city.trim() || !form.venue.trim() || !form.startsAt || !form.sourceUrl.trim()))
         return 'Заполните все поля о концерте';
+      if (custom && !source?.ok) return source?.reason ?? 'Проверьте ссылку';
     }
     if (s === 1) {
       if (!form.orderNumber.trim() || !form.purchaseEmail.trim() || !form.sector.trim()) return 'Заполните номер заказа, email и сектор';
+      const orderProblem = orderNumberProblem(form.orderNumber);
+      if (orderProblem) return orderProblem;
+      if (!form.boughtAt || (form.boughtAt === 'other' && form.boughtOther.trim().length < 3)) return 'Укажите, где покупали билет';
       if (rubToKopecks(form.faceValue) < 10000) return 'Номинал от 100 ₽';
       if (noOrganizer && !file) return 'Приложите файл билета';
       if (noOrganizer && !agree) return 'Подтвердите, что не передавали билет другим';
@@ -142,7 +148,7 @@ export function Sell() {
             : undefined,
           orderNumber: form.orderNumber,
           purchaseEmail: form.purchaseEmail,
-          boughtAt: form.boughtAt,
+          boughtAt: form.boughtAt === 'other' ? form.boughtOther.trim() : form.boughtAt,
           ticketFile: file ?? undefined,
           seat: { sector: form.sector.trim(), row: form.row.trim() || undefined, place: form.place.trim() || undefined },
           faceValue: rubToKopecks(form.faceValue),
@@ -223,7 +229,25 @@ export function Sell() {
                 <label className="field"><span>Дата и время начала</span><input className="input" type="datetime-local" value={form.startsAt} onChange={set('startsAt')} /></label>
                 <label className="field">
                   <span>Ссылка на страницу концерта</span>
-                  <input className="input" type="url" value={form.sourceUrl} onChange={set('sourceUrl')} placeholder="Сайт организатора, площадки или афиша" />
+                  <input
+                    className="input"
+                    type="url"
+                    inputMode="url"
+                    value={form.sourceUrl}
+                    onChange={set('sourceUrl')}
+                    placeholder="https://afisha.yandex.ru/volgograd/concert/…"
+                    aria-invalid={source ? !source.ok : undefined}
+                  />
+                  {source && !source.ok ? (
+                    <small className="bad-text">{source.reason}</small>
+                  ) : source?.ok && source.known ? (
+                    <small className="ok-text">✓ {source.known}</small>
+                  ) : (
+                    <small className="muted">
+                      Страница этого концерта на билетном сервисе, у организатора или площадки. Видео, соцсети и поиск не подойдут —
+                      модератор сверит по ссылке название, дату и площадку.
+                    </small>
+                  )}
                 </label>
               </div>
             )}
@@ -237,7 +261,22 @@ export function Sell() {
               <label className="field"><span>Номер заказа</span><input className="input" value={form.orderNumber} onChange={set('orderNumber')} placeholder="Из письма с билетом" /></label>
               <label className="field"><span>Email, на который покупали</span><input className="input" type="email" value={form.purchaseEmail} onChange={set('purchaseEmail')} /></label>
             </div>
-            <label className="field"><span>Где покупали</span><input className="input" value={form.boughtAt} onChange={set('boughtAt')} placeholder="Например, касса площадки" /></label>
+            <div className="field">
+              <span>Где покупали</span>
+              <Select
+                label="Где покупали"
+                placeholder="Выберите сервис или кассу"
+                value={form.boughtAt}
+                onChange={(boughtAt) => setForm({ ...form, boughtAt })}
+                options={TICKET_SELLERS}
+              />
+            </div>
+            {form.boughtAt === 'other' && (
+              <label className="field">
+                <span>Где именно</span>
+                <input className="input" value={form.boughtOther} onChange={set('boughtOther')} placeholder="Название сайта или кассы" />
+              </label>
+            )}
             <div className="field-row field-row--3">
               <label className="field"><span>Сектор или тип</span><input className="input" value={form.sector} onChange={set('sector')} placeholder="Партер, танцпол…" /></label>
               <label className="field"><span>Ряд</span><input className="input" inputMode="numeric" value={form.row} onChange={set('row')} /></label>

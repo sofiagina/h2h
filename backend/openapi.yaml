@@ -419,9 +419,37 @@ paths:
     post:
       tags: [sell]
       summary: Выставить билет на продажу
-      description: >
+      description: |
         multipart: поле data — JSON SellRequestInput (без файла), ticketFile —
         файл билета (обязателен для концертов без организатора).
+
+        **Защита модерации от мусора** (правила те же, что во фронте —
+        `src/lib/sourceCheck.ts`; фронт можно обойти, поэтому бэкенд обязан проверять сам):
+
+        Для любой заявки:
+        - orderNumber — не короче 4 символов, есть цифры, не одинаковые символы, не «1234/12345/0000» → 400 INVALID;
+        - ticketFile — только PDF или изображение; SHA-256 файла совпал с файлом другой живой
+          заявки (не cancelled; своя rejected — можно) → 409 DUPLICATE_TICKET. Сверять и штрихкод
+          из файла (ZXing): тот же код в другой заявке — тоже DUPLICATE_TICKET.
+
+        Только для newEvent:
+        - sourceUrl: http(s), домен, не IP; не главная страница сайта; стоп-лист — видео,
+          соцсети, поиск, сокращатели (YouTube, Rutube, TikTok, VK-видео, Telegram, Google/Яндекс-поиск,
+          Википедия, clck.ru, bit.ly и т. п.); ВКонтакте — только страница мероприятия или сообщества
+          → 400 INVALID_SOURCE с понятной причиной;
+        - у продавца 3+ страйков (отказов со spam=true) — новые концерты закрыты на 30 дней с последнего
+          страйка → 403 SELLER_RESTRICTED (каталожные концерты продавать можно);
+        - не больше 2 заявок с новым концертом в статусе review одновременно и 5 за сутки → 429 TOO_MANY_PENDING;
+        - (рекомендуется) аккаунт младше суток — новые концерты недоступны.
+
+        После создания бэкенд асинхронно считает SellCheck (см. AdminSellRequest.check):
+        - известный билетный сервис по домену ссылки — плюс;
+        - загрузить страницу по ссылке (защита от SSRF: только публичные IP после резолва,
+          без редиректов во внутреннюю сеть, таймаут 5 с, до 2 МБ) и искать на ней название,
+          город, дату — совпадения плюсом;
+        - QR/штрихкод в файле найден — плюс, не найден — минус;
+        - PDF лучше фото; история продавца: одобренные — плюс, страйки — минус.
+        Ниже 40 — suspicious: такие заявки модератор видит отдельным списком.
       requestBody:
         required: true
         content:
@@ -441,9 +469,28 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SellRequest" }
-        "400": { $ref: "#/components/responses/Error" }
+        "400":
+          description: INVALID, INVALID_SOURCE (ссылка не на страницу концерта)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
         "401": { $ref: "#/components/responses/Error" }
+        "403":
+          description: SELLER_RESTRICTED — страйки, новые концерты временно закрыты
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
         "404": { $ref: "#/components/responses/Error" }
+        "409":
+          description: DUPLICATE_TICKET — этот файл или штрихкод уже в другой заявке
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "429":
+          description: TOO_MANY_PENDING — лимит заявок с новыми концертами
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
 
   /sell-requests/{id}/cancel:
     post:
@@ -630,7 +677,10 @@ paths:
     post:
       tags: [admin]
       summary: Решение по заявке продавца
-      description: approve=true — публикует концерт и билет; иначе отклоняет (comment обязателен).
+      description: >
+        approve=true — публикует концерт и билет; иначе отклоняет (comment обязателен).
+        spam=true (только с approve=false) — отказ как мусор: продавцу страйк, comment можно
+        не писать — подставляется стандартный текст. В аудит пишется sell:spam.
       parameters: [ { $ref: "#/components/parameters/SellRequestId" } ]
       requestBody:
         required: true
@@ -642,6 +692,7 @@ paths:
               properties:
                 approve: { type: boolean }
                 comment: { type: string }
+                spam: { type: boolean, default: false }
       responses:
         "200":
           description: OK
@@ -993,7 +1044,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/SellRequest"
         - type: object
-          required: [sellerEmail, purchaseEmail, boughtAt, sourceUrl, ticketFileName, eventIsNew]
+          required: [sellerEmail, purchaseEmail, boughtAt, sourceUrl, ticketFileName, eventIsNew, check, seller]
           properties:
             sellerEmail: { type: string }
             purchaseEmail: { type: string }
@@ -1001,6 +1052,34 @@ components:
             sourceUrl: { type: [string, "null"] }
             ticketFileName: { type: [string, "null"] }
             eventIsNew: { type: boolean }
+            check: { $ref: "#/components/schemas/SellCheck" }
+            seller: { $ref: "#/components/schemas/SellerHistory" }
+
+    SellCheck:
+      type: object
+      description: Автоматическая оценка заявки до модератора.
+      required: [score, suspicious, signals]
+      properties:
+        score: { type: integer, minimum: 0, maximum: 100 }
+        suspicious: { type: boolean, description: "score < 40 — отдельный список «Подозрительные»" }
+        signals:
+          type: array
+          items:
+            type: object
+            required: [ok, text]
+            properties:
+              ok: { type: boolean }
+              text: { type: string, example: "Ссылка на билетный сервис: Кассир.ру" }
+
+    SellerHistory:
+      type: object
+      required: [requests, approved, rejected, strikes, restrictedUntil]
+      properties:
+        requests: { type: integer }
+        approved: { type: integer }
+        rejected: { type: integer }
+        strikes: { type: integer, description: Отказы со spam=true }
+        restrictedUntil: { type: [string, "null"], format: date-time }
 
     AdminDispute:
       allOf:
@@ -1055,7 +1134,11 @@ components:
         newEvent: { $ref: "#/components/schemas/NewEventInput" }
         orderNumber: { type: string }
         purchaseEmail: { type: string, format: email }
-        boughtAt: { type: string, description: Где куплен билет. }
+        boughtAt:
+          type: string
+          description: >
+            Где куплен билет: значение из списка фронта (Яндекс Афиша, Кассир.ру, Ticketland, Радарио,
+            Intickets, Ticketscloud, Qtickets, Timepad, Касса площадки) или свободный текст для «Другое».
         seat: { $ref: "#/components/schemas/Seat" }
         faceValue: { $ref: "#/components/schemas/Money" }
         payout: { $ref: "#/components/schemas/PayoutInput" }

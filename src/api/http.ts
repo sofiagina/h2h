@@ -176,7 +176,8 @@ export const httpApi: Api = {
   adminCheckNow: (id) => req('POST', `/admin/aggregators/${id}/check`),
   adminOrders: () => req('GET', '/admin/orders'),
   adminSellRequests: () => req('GET', '/admin/sell-requests'),
-  adminReviewSell: (id, approve, comment) => req('POST', `/admin/sell-requests/${id}/review`, { body: { approve, comment } }),
+  adminReviewSell: (id, approve, comment, spam = false) =>
+    req('POST', `/admin/sell-requests/${id}/review`, { body: { approve, comment, spam } }),
   adminDisputes: () => req('GET', '/admin/disputes'),
   adminResolveDispute: (orderId, refund, comment) => req('POST', `/admin/disputes/${orderId}/resolve`, { body: { refund, comment } }),
 };

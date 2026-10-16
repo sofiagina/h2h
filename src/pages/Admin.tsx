@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api, type AdminSellRequest, type Aggregator, type AggregatorMode } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { Select } from '../components/Select';
+import { NEW_EVENT_LIMITS } from '../lib/sourceCheck';
 import { AggBadge, DisputeBadge, ErrorBox, OrderBadge, SellBadge, Spinner } from '../components/ui';
 import { dateLong, dateTime, money, seatLabel } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
@@ -210,19 +211,34 @@ function Review() {
   const list = useAsync(() => api.adminSellRequests(), []);
   if (list.error) return <ErrorBox error={list.error} onRetry={() => list.reload()} />;
   if (!list.data) return <Spinner />;
-  const pending = list.data.filter((s) => s.status === 'review');
+  // Сначала самые правдоподобные: модератор тратит время на то, что скорее всего настоящее.
+  const pending = list.data.filter((s) => s.status === 'review').sort((a, b) => b.check.score - a.check.score);
+  const normal = pending.filter((s) => !s.check.suspicious);
+  const suspicious = pending.filter((s) => s.check.suspicious);
   const done = list.data.filter((s) => s.status !== 'review');
   return (
     <>
       <p className="muted">
-        Концерты без организатора. Проверьте ссылку и билет.
+        Концерты без организатора. Проверьте ссылку и билет. Сверху — заявки с лучшей оценкой.
       </p>
       {!pending.length && <p className="muted">Новых заявок нет.</p>}
       <div className="agg-grid">
-        {pending.map((s) => (
+        {normal.map((s) => (
           <ReviewCard key={s.id} initial={s} onDone={() => list.reload(true)} />
         ))}
       </div>
+      {suspicious.length > 0 && (
+        <details className="suspicious mt">
+          <summary>
+            Подозрительные: {suspicious.length} <span className="muted small">— оценка ниже {NEW_EVENT_LIMITS.suspiciousBelow}, скорее всего мусор</span>
+          </summary>
+          <div className="agg-grid">
+            {suspicious.map((s) => (
+              <ReviewCard key={s.id} initial={s} onDone={() => list.reload(true)} />
+            ))}
+          </div>
+        </details>
+      )}
       {done.length > 0 && (
         <>
           <h3 className="mt">Все заявки продавцов</h3>
@@ -257,11 +273,11 @@ function ReviewCard({ initial, onDone }: { initial: AdminSellRequest; onDone(): 
   const [error, setError] = useState<Error | null>(null);
   const s = initial;
 
-  async function decide(approve: boolean) {
+  async function decide(approve: boolean, spam = false) {
     setBusy(true);
     setError(null);
     try {
-      await api.adminReviewSell(s.id, approve, comment);
+      await api.adminReviewSell(s.id, approve, comment, spam);
       onDone();
     } catch (e) {
       setError(e as Error);
@@ -276,11 +292,30 @@ function ReviewCard({ initial, onDone }: { initial: AdminSellRequest; onDone(): 
           <h3>{s.event.title}</h3>
           <p className="muted small">{dateLong(s.event.startsAt)} · {s.event.venue.name}, {s.event.venue.city}</p>
         </div>
-        {s.eventIsNew && <span className="badge badge--info">Новый концерт</span>}
+        <div className="review__badges">
+          <span className={`score score--${s.check.score >= 70 ? 'ok' : s.check.suspicious ? 'bad' : 'warn'}`} title="Оценка заявки, 0–100">
+            {s.check.score}
+          </span>
+          {s.eventIsNew && <span className="badge badge--info">Новый концерт</span>}
+        </div>
       </header>
+      <ul className="signals small">
+        {s.check.signals.map((sig) => (
+          <li key={sig.text} className={sig.ok ? 'ok-text' : 'bad-text'}>
+            {sig.ok ? '✓' : '✕'} {sig.text}
+          </li>
+        ))}
+      </ul>
       <dl className="kv small">
         <dt>Билет</dt><dd>{seatLabel(s.seat)} · {money(s.faceValue)}</dd>
-        <dt>Продавец</dt><dd>{s.sellerEmail}</dd>
+        <dt>Продавец</dt>
+        <dd>
+          {s.sellerEmail}
+          <span className="muted">
+            {' '}· заявок {s.seller.requests}, одобрено {s.seller.approved}, отклонено {s.seller.rejected}
+            {s.seller.strikes > 0 && <b className="bad-text">, страйков {s.seller.strikes}</b>}
+          </span>
+        </dd>
         <dt>Заказ</dt><dd>{s.orderNumber} · {s.purchaseEmail}</dd>
         <dt>Где купил</dt><dd>{s.boughtAt || '—'}</dd>
         <dt>Файл</dt><dd>{s.ticketFileName ?? '—'}</dd>
@@ -295,6 +330,14 @@ function ReviewCard({ initial, onDone }: { initial: AdminSellRequest; onDone(): 
       <div className="agg__actions">
         <button className="btn btn--primary btn--sm" disabled={busy} onClick={() => decide(true)}>Опубликовать</button>
         <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => decide(false)}>Отклонить</button>
+        <button
+          className="btn btn--ghost btn--sm bad-text"
+          disabled={busy}
+          onClick={() => decide(false, true)}
+          title={`Отклонить как мусор и поставить продавцу страйк. После ${NEW_EVENT_LIMITS.strikesToBlock} — новые концерты закрыты на ${NEW_EVENT_LIMITS.blockDays} дней`}
+        >
+          Спам
+        </button>
       </div>
     </article>
   );

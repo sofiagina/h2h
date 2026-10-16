@@ -572,6 +572,17 @@ select option { background: var(--surface); color: var(--ink); }
 .profile__menu a.profile__notices { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; text-align: center; }
 
+/* Модерация заявок */
+.review__badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.score { display: inline-grid; place-items: center; min-width: 40px; height: 32px; padding: 0 8px; border-radius: 10px; font-weight: 800; font-size: 15px; }
+.score--ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.score--warn { background: color-mix(in srgb, #d99a00 18%, transparent); color: #b07d00; }
+.score--bad { background: var(--bad-soft); color: var(--bad); }
+.signals { list-style: none; margin: 0 0 12px; padding: 10px 12px; display: grid; gap: 4px; border-radius: 10px; background: var(--bg); }
+.signals li { font-weight: 500; }
+.suspicious > summary { cursor: pointer; font-weight: 700; padding: 10px 0; }
+.suspicious[open] > summary { margin-bottom: 8px; }
+
 /* Вход */
 .login__links { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .link-btn:disabled { color: var(--ink-2); text-decoration: none; cursor: default; }

@@ -8,6 +8,7 @@
 //  - escrow: организатора нет, билет передаёт продавец, выплата через сутки после начала концерта.
 
 import { toDemoUrl, validateFiles } from '../lib/files';
+import { checkSourceUrl, NEW_EVENT_LIMITS, orderNumberProblem, TICKET_SELLERS } from '../lib/sourceCheck';
 import { tokenStore } from './token';
 import {
   ApiError,
@@ -22,6 +23,9 @@ import {
   type EventGroup,
   type EventItem,
   type AppNotification,
+  type CheckSignal,
+  type SellCheck,
+  type SellerHistory,
   type EventRef,
   type Guarantee,
   type HealthCheck,
@@ -56,8 +60,13 @@ type EventRow = Omit<EventItem, 'salesEnabled' | 'minFaceValue' | 'availableCoun
 type OfferRow = Offer & { state: 'available' | 'reserved' | 'sold' };
 /** endedAt — когда заказ стал FAILED или EXPIRED: нужно для ленты уведомлений. */
 type OrderRow = Order & { userId: string; paidAt?: string; issuedAt?: string; endedAt?: string };
-type SellRow = Omit<AdminSellRequest, 'payout' | 'disputeOrderId' | 'disputeStatus'> & {
+type SellRow = Omit<AdminSellRequest, 'payout' | 'disputeOrderId' | 'disputeStatus' | 'check' | 'seller'> & {
   userId: string;
+  /** SHA-256 файла билета: тот же файл во второй заявке — копия. */
+  ticketFileHash?: string;
+  ticketFileType?: string;
+  /** Отклонено модератором как мусор — страйк продавцу. */
+  spam?: boolean;
   /** Заказ, в котором билет продан: по нему продавец попадает в спор. */
   orderId?: string;
   /** Предложение в витрине, созданное по заявке: по нему снимаем с продажи. */
@@ -279,6 +288,14 @@ function seed(): DB {
     status: 'scheduled', aggregatorId: null, organizerConnected: false, published: false,
   };
   events.push(pendingEvent);
+  // Пример мусора для модерации: ссылка на видео, фото вместо билета, выдуманный номер.
+  const junkEvent: EventRow = {
+    id: 'ev_user_2', title: 'Концерт года', artist: 'Концерт года', category: 'Другое',
+    description: 'Концерт добавлен продавцом. Организатор не подключён к Hand2Hand.', ageLimit: 0,
+    startsAt: daysFromNow(9, 20), venue: { name: 'Стадион', city: 'Волгоград', address: '' },
+    status: 'scheduled', aggregatorId: null, organizerConnected: false, published: false,
+  };
+  events.push(junkEvent);
 
   return {
     favorites: [],
@@ -293,6 +310,14 @@ function seed(): DB {
         faceValue: 120000, orderNumber: 'DK-48211', status: 'review', guarantee: 'escrow', createdAt: iso(new Date(Date.now() - 3600_000)),
         purchaseEmail: 'seller@example.test', boughtAt: 'Касса ДК', sourceUrl: 'https://example.test/afisha/hor-yubiley', ticketFileName: 'bilet.pdf',
         eventIsNew: true, payout: { method: 'sbp', details: '+7 ••• •••-45-12, Сбербанк' },
+        ticketFileType: 'application/pdf',
+      },
+      {
+        id: id('sr'), userId: 'seed_junk', sellerEmail: 'krutoi2011@example.test', event: ref(junkEvent), seat: { sector: 'VIP' },
+        faceValue: 99900, orderNumber: '1111', status: 'review', guarantee: 'escrow', createdAt: iso(new Date(Date.now() - 1800_000)),
+        purchaseEmail: 'krutoi2011@example.test', boughtAt: 'в интернете', sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        ticketFileName: 'bilet.jpg', ticketFileType: 'image/jpeg', eventIsNew: true,
+        payout: { method: 'card', details: 'карта •••• 0000' },
       },
     ],
     waitlist: [
@@ -462,11 +487,71 @@ function toSellRequest(s: SellRow): SellRequest {
   };
 }
 
+function sellerHistory(userId: string): SellerHistory {
+  const rows = db.sell.filter((x) => x.userId === userId);
+  const spam = rows.filter((x) => x.spam).sort((a, b) => (a.closedAt ?? '').localeCompare(b.closedAt ?? ''));
+  const lastStrike = spam.at(-1)?.closedAt;
+  const until = spam.length >= NEW_EVENT_LIMITS.strikesToBlock && lastStrike ? after(lastStrike, NEW_EVENT_LIMITS.blockDays * DAY) : null;
+  return {
+    requests: rows.length,
+    approved: rows.filter((x) => x.status === 'listed' || x.status === 'sold' || (x.status === 'cancelled' && x.listedAt)).length,
+    rejected: rows.filter((x) => x.status === 'rejected').length,
+    strikes: spam.length,
+    restrictedUntil: until && Date.parse(until) > Date.now() ? until : null,
+  };
+}
+
+/**
+ * Оценка заявки до модератора. В бэкенде к этому добавляется то, что браузеру недоступно:
+ * загрузка страницы по ссылке (совпадение названия, города, даты) и поиск QR/штрихкода в файле.
+ */
+function checkOf(s: SellRow, seller: SellerHistory): SellCheck {
+  const signals: CheckSignal[] = [];
+  let score = 20;
+  const add = (ok: boolean, text: string, points: number) => {
+    signals.push({ ok, text });
+    score += points;
+  };
+
+  if (s.sourceUrl) {
+    const v = checkSourceUrl(s.sourceUrl);
+    if (!v.ok) add(false, `Ссылка: ${v.reason.charAt(0).toLowerCase()}${v.reason.slice(1)}`, -30);
+    else if (v.known) add(true, `Ссылка на билетный сервис: ${v.known}`, 30);
+    else add(true, `Ссылка на сайт ${v.host} — откройте и сверьте название и дату`, 10);
+  }
+  if (s.ticketFileType === 'application/pdf' || s.ticketFileName?.toLowerCase().endsWith('.pdf')) add(true, 'Файл билета — PDF', 15);
+  else if (s.ticketFileName) add(true, 'Файл билета — фото: проверьте, что это не картинка из интернета', 5);
+  else if (s.eventIsNew) add(false, 'Файла билета нет', -20);
+
+  const orderProblem = orderNumberProblem(s.orderNumber);
+  if (orderProblem) add(false, `Номер заказа «${s.orderNumber}» выглядит выдуманным`, -15);
+  else add(true, 'Номер заказа похож на настоящий', 10);
+  if (TICKET_SELLERS.some((t) => t.value === s.boughtAt)) add(true, `Где купил: ${s.boughtAt}`, 5);
+
+  const days = (Date.parse(s.event.startsAt) - Date.now()) / DAY;
+  if (days > 365) add(false, 'Концерт больше чем через год', -10);
+  else add(true, 'Дата концерта правдоподобная', 5);
+
+  if (seller.approved > 0) add(true, `Продавец уже продавал: одобрено ${seller.approved}`, 15);
+  if (seller.strikes > 0) add(false, `У продавца страйков: ${seller.strikes}`, -20 * seller.strikes);
+  if (seller.rejected > seller.strikes) add(false, `Отклонённых заявок: ${seller.rejected}`, -5 * Math.min(3, seller.rejected - seller.strikes));
+
+  score = Math.max(0, Math.min(100, score));
+  return { score, suspicious: score < NEW_EVENT_LIMITS.suspiciousBelow, signals };
+}
+
 function toAdminSell(s: SellRow): AdminSellRequest {
+  const seller = sellerHistory(s.userId);
   return {
     ...toSellRequest(s), sellerEmail: s.sellerEmail, purchaseEmail: s.purchaseEmail, boughtAt: s.boughtAt,
     sourceUrl: s.sourceUrl, ticketFileName: s.ticketFileName, eventIsNew: s.eventIsNew,
+    check: checkOf(s, seller), seller,
   };
+}
+
+async function sha256(file: File) {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 function listOffer(s: SellRow) {
@@ -808,6 +893,8 @@ export const mockApi: Api = {
     await delay(500);
     const user = currentUser();
     if (!input.orderNumber.trim()) throw new ApiError('INVALID', 'Укажите номер заказа из письма с билетом');
+    const orderProblem = orderNumberProblem(input.orderNumber);
+    if (orderProblem) throw new ApiError('INVALID', orderProblem);
     if (!EMAIL_RE.test(input.purchaseEmail)) throw new ApiError('INVALID', 'Укажите email, на который покупали билет');
     if (!input.seat.sector.trim()) throw new ApiError('INVALID', 'Укажите сектор или тип билета');
     if (!(input.faceValue >= 10000)) throw new ApiError('INVALID', 'Номинал от 100 ₽');
@@ -821,8 +908,23 @@ export const mockApi: Api = {
       const hasLetters = (v: string) => /\p{L}{2,}/u.test(v);
       if (!hasLetters(n.title) || !hasLetters(n.city) || !hasLetters(n.venue)) throw new ApiError('INVALID', 'Название, город и площадку напишите словами, как в афише');
       if (Date.parse(n.startsAt) < Date.now()) throw new ApiError('INVALID', 'Концерт уже прошёл');
-      if (!/^https?:\/\/\S+\.\S+/.test(n.sourceUrl)) throw new ApiError('INVALID', 'Добавьте ссылку на страницу концерта');
+      const source = checkSourceUrl(n.sourceUrl);
+      if (!source.ok) throw new ApiError('INVALID_SOURCE', source.reason);
       if (!input.ticketFile) throw new ApiError('INVALID', 'Приложите файл билета');
+
+      // Ограничения на новые концерты: их проверяет человек, его время — главный ресурс.
+      const history = sellerHistory(user.id);
+      if (history.restrictedUntil)
+        throw new ApiError(
+          'SELLER_RESTRICTED',
+          `Несколько ваших заявок отклонили как недостоверные. Добавлять новые концерты можно будет с ${new Date(history.restrictedUntil).toLocaleDateString('ru-RU')}. Билеты на концерты из каталога продавать можно.`,
+          403,
+        );
+      const mine = db.sell.filter((x) => x.userId === user.id && x.eventIsNew);
+      if (mine.filter((x) => x.status === 'review').length >= NEW_EVENT_LIMITS.inReview)
+        throw new ApiError('TOO_MANY_PENDING', `На проверке уже ${NEW_EVENT_LIMITS.inReview} заявки с новыми концертами. Дождитесь решения модератора.`, 429);
+      if (mine.filter((x) => Date.now() - Date.parse(x.createdAt) < DAY).length >= NEW_EVENT_LIMITS.perDay)
+        throw new ApiError('TOO_MANY_PENDING', 'Сегодня вы уже добавили много новых концертов. Попробуйте завтра.', 429);
       event = {
         id: id('ev'), title: n.title.trim(), artist: n.title.trim(), category: 'Другое', ageLimit: 0, status: 'scheduled',
         description: 'Концерт добавлен продавцом. Организатор не подключён к Hand2Hand.',
@@ -837,10 +939,18 @@ export const mockApi: Api = {
       if (!event.organizerConnected && !input.ticketFile) throw new ApiError('INVALID', 'Приложите файл билета');
     }
 
+    // Тот же файл билета в другой живой заявке — копия, а не второй билет.
+    const fileHash = input.ticketFile ? await sha256(input.ticketFile) : undefined;
+    if (fileHash && db.sell.some((x) => x.ticketFileHash === fileHash && x.status !== 'cancelled' && !(x.userId === user.id && x.status === 'rejected'))) {
+      if (eventIsNew) db.events = db.events.filter((e) => e !== event);
+      throw new ApiError('DUPLICATE_TICKET', 'Этот файл билета уже загружали в другой заявке. Приложите свой билет.', 409);
+    }
+
     const row: SellRow = {
       id: id('sr'), userId: user.id, sellerEmail: user.email, event: ref(event), seat: input.seat, faceValue: input.faceValue,
       orderNumber: input.orderNumber.trim(), purchaseEmail: input.purchaseEmail.trim(), boughtAt: input.boughtAt.trim(),
-      sourceUrl: input.newEvent?.sourceUrl ?? null, ticketFileName: input.ticketFile?.name ?? null, eventIsNew,
+      sourceUrl: input.newEvent?.sourceUrl.trim() ?? null, ticketFileName: input.ticketFile?.name ?? null, eventIsNew,
+      ticketFileHash: fileHash, ticketFileType: input.ticketFile?.type,
       guarantee: event.organizerConnected ? 'organizer' : 'escrow',
       // С организатором билет проверяет его система по API, без него — модератор.
       status: event.organizerConnected ? 'pending' : 'review',
@@ -989,13 +1099,16 @@ export const mockApi: Api = {
     return db.sell.map(toAdminSell);
   },
 
-  async adminReviewSell(sellId, approve, comment) {
+  async adminReviewSell(sellId, approve, comment, spam = false) {
     await delay(400);
     const admin = requireAdmin();
     const s = db.sell.find((x) => x.id === sellId);
     if (!s) throw new ApiError('NOT_FOUND', 'Заявка не найдена', 404);
     if (s.status !== 'review') throw new ApiError('INVALID', 'Заявка уже рассмотрена');
+    // Для «спама» причина по умолчанию: модератору не нужно сочинять ответ мусору.
+    if (spam) comment = comment.trim() || 'Заявка отклонена как недостоверная: ссылка или билет не подтверждают концерт.';
     if (!approve && !comment.trim()) throw new ApiError('INVALID', 'Напишите продавцу причину отказа');
+    if (spam) s.spam = true;
     if (approve) {
       const e = eventById(s.event.id);
       if (e) e.published = true;
@@ -1005,7 +1118,7 @@ export const mockApi: Api = {
       s.rejectReason = comment.trim();
       s.closedAt = now();
     }
-    db.audit.push({ at: now(), userId: admin.id, action: approve ? 'sell:approve' : 'sell:reject', target: sellId, reason: comment });
+    db.audit.push({ at: now(), userId: admin.id, action: approve ? 'sell:approve' : spam ? 'sell:spam' : 'sell:reject', target: sellId, reason: comment });
     save();
     return toAdminSell(s);
   },

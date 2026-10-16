@@ -184,6 +184,33 @@ export interface NewEventInput {
   sourceUrl: string;
 }
 
+/** Одна автоматическая проверка заявки: что проверили и прошло ли. */
+export interface CheckSignal {
+  ok: boolean;
+  text: string;
+}
+
+/**
+ * Оценка заявки бэкендом до модератора: 0–100, чем выше — тем правдоподобнее.
+ * suspicious — ниже порога, заявка уходит в отдельный список и не мешает остальным.
+ */
+export interface SellCheck {
+  score: number;
+  suspicious: boolean;
+  signals: CheckSignal[];
+}
+
+/** История продавца для модератора. */
+export interface SellerHistory {
+  requests: number;
+  approved: number;
+  rejected: number;
+  /** Отказы с пометкой «спам». От 3 — новые концерты закрыты на 30 дней. */
+  strikes: number;
+  /** До какого момента нельзя заявлять новые концерты; null — ограничений нет. */
+  restrictedUntil: string | null;
+}
+
 export interface AdminSellRequest extends SellRequest {
   sellerEmail: string;
   purchaseEmail: string;
@@ -191,6 +218,8 @@ export interface AdminSellRequest extends SellRequest {
   sourceUrl: string | null;
   ticketFileName: string | null;
   eventIsNew: boolean;
+  check: SellCheck;
+  seller: SellerHistory;
 }
 
 export interface SellRequestInput {
@@ -364,7 +393,8 @@ export interface Api {
   adminCheckNow(id: string): Promise<Aggregator>;
   adminOrders(): Promise<Order[]>;
   adminSellRequests(): Promise<AdminSellRequest[]>;
-  adminReviewSell(id: string, approve: boolean, comment: string): Promise<AdminSellRequest>;
+  /** spam — отказ с пометкой «мусор»: продавцу ставится страйк. */
+  adminReviewSell(id: string, approve: boolean, comment: string, spam?: boolean): Promise<AdminSellRequest>;
   adminDisputes(): Promise<AdminDispute[]>;
   adminResolveDispute(orderId: string, refund: boolean, comment: string): Promise<DisputeView>;
 }
