@@ -64,7 +64,7 @@ npm run dev
 | Продать билет | `/sell` | Мастер из 4 шагов с полосой прогресса: концерт (или «нет в списке») → билет → куда перевести деньги (СБП, карта, счёт) → проверка |
 | Вход | `/login` | Вход по одноразовому коду на почту |
 | Мои билеты | `/account` | Купленные; мои продажи со статусом выплаты и входом в спор; уведомления |
-| Админка | `/admin` | API организаторов (статус, история проверок, режим продаж); модерация; споры; заказы |
+| Админка | `/admin` | API организаторов (статус, история проверок, режим продаж); «Концерты» — список заявок, решение в окне поверх страницы (чек-лист, карточка концерта, привязка к существующему, отказ с причиной); «Модерация билетов»; споры; заказы |
 
 ## Два режима гарантии
 
@@ -131,7 +131,7 @@ npm run dev
 | GET | `/orders/{id}/dispute` | → `DisputeView` (`order`, `dispute`, `viewer`, `canWrite`) |
 | POST | `/orders/{id}/dispute/messages` | **multipart**: `text`, `files[]` → `DisputeView` |
 | GET | `/users/me/orders` · `/users/me/sell-requests` · `/users/me/waitlist` | списки для кабинета |
-| POST | `/sell-requests` | **multipart**: `data` (JSON `SellRequestInput` без файла; `eventId` **или** `newEvent`), `ticketFile` (с QR) → `SellRequest` |
+| POST | `/sell-requests` | **multipart**: `data` (JSON `SellRequestInput` без файла; `eventId` **или** `newEvent`), `ticketFile` (с QR), `receiptFile` (чек покупки, необязательно) → `SellRequest` |
 | GET · PUT | `/users/me/payout-method` | реквизиты выплаты: `{ method: 'sbp', phone, bank }` · `{ method: 'card', cardToken, cardLast4 }` · `{ method: 'account', holder, bik, account }` → `PayoutMethodInfo` (только маска); GET без реквизитов → 204 |
 | POST | `/sell-requests/{id}/cancel` | снять своё объявление, пока билет не купили → `SellRequest` (`status: cancelled`); `409 ALREADY_SOLD` / `RESERVED` (билет сейчас оплачивают) / `INVALID` (уже закрыто) |
 | GET | `/users/me/notifications` | → `{ items: AppNotification[], unread }`: оплата, билет готов, не удалось, бронь истекла, в продаже, отклонено, снято, продано, выплата, спор; новые сверху, до 50 |

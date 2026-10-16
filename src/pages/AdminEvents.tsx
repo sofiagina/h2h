@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { api, type EventCardInput, type EventGroup, type EventItem, type EventRejectReason, type EventRequest } from '../api';
+import { Modal } from '../components/Modal';
 import { Select } from '../components/Select';
 import { ErrorBox, Spinner } from '../components/ui';
 import { CATEGORIES } from '../lib/categories';
@@ -41,12 +42,15 @@ function toLocalInput(iso: string) {
 export function EventRequests() {
   const list = useAsync(() => api.adminEventRequests(), []);
   const catalog = useAsync(() => api.listEvents({ scope: 'sell' }), []);
+  // Открытая заявка: держим id, чтобы после перезагрузки списка в окне были свежие данные.
+  const [openId, setOpenId] = useState<string | null>(null);
   if (list.error) return <ErrorBox error={list.error} onRetry={() => list.reload()} />;
   if (!list.data) return <Spinner />;
   const pending = list.data.filter((r) => r.status === 'pending');
   const normal = pending.filter((r) => !r.check.suspicious);
   const suspicious = pending.filter((r) => r.check.suspicious);
   const done = list.data.filter((r) => r.status !== 'pending');
+  const open = list.data.find((r) => r.id === openId && r.status === 'pending') ?? null;
   const reload = () => {
     list.reload(true);
     catalog.reload(true);
@@ -56,26 +60,42 @@ export function EventRequests() {
     <>
       <p className="muted">
         Концерты, которых нет в каталоге: продавцы просят их добавить. Одна заявка на концерт, сколько бы продавцов ни
-        просило. После добавления их билеты уйдут во вкладку «Модерация билетов».
+        просило. Откройте заявку, проверьте по ссылке и решите. После добавления билеты уйдут во вкладку «Модерация билетов».
       </p>
       {!pending.length && <p className="muted">Новых заявок нет.</p>}
-      <div className="agg-grid">
+      <ul className="items">
         {normal.map((r) => (
-          <EventRequestCard key={r.id} request={r} catalog={catalog.data ?? []} onDone={reload} />
+          <EventRequestRow key={r.id} request={r} onOpen={() => setOpenId(r.id)} />
         ))}
-      </div>
+      </ul>
       {suspicious.length > 0 && (
         <details className="suspicious mt">
           <summary>
             Подозрительные: {suspicious.length}{' '}
             <span className="muted small">— оценка ниже {NEW_EVENT_LIMITS.suspiciousBelow}, скорее всего мусор</span>
           </summary>
-          <div className="agg-grid">
+          <ul className="items">
             {suspicious.map((r) => (
-              <EventRequestCard key={r.id} request={r} catalog={catalog.data ?? []} onDone={reload} />
+              <EventRequestRow key={r.id} request={r} onOpen={() => setOpenId(r.id)} />
             ))}
-          </div>
+          </ul>
         </details>
+      )}
+      {open && (
+        <Modal
+          title={open.title}
+          hint={`${dateLong(open.startsAt)} · ${open.venue}, ${open.city}`}
+          onClose={() => setOpenId(null)}
+        >
+          <EventRequestForm
+            request={open}
+            catalog={catalog.data ?? []}
+            onDone={() => {
+              setOpenId(null);
+              reload();
+            }}
+          />
+        </Modal>
       )}
       {done.length > 0 && (
         <>
@@ -109,7 +129,30 @@ export function EventRequests() {
 
 type Mode = 'add' | 'merge' | 'reject';
 
-function EventRequestCard({ request: r, catalog, onDone }: { request: EventRequest; catalog: EventItem[]; onDone(): void }) {
+const scoreTone = (c: EventRequest['check']) => (c.score >= 70 ? 'ok' : c.suspicious ? 'bad' : 'warn');
+
+/** Строка списка: заявка видна целиком одним взглядом, решение — в окне. */
+function EventRequestRow({ request: r, onOpen }: { request: EventRequest; onOpen(): void }) {
+  const receipts = r.sellers.filter((x) => x.hasReceipt).length;
+  return (
+    <li>
+      <button type="button" className="item request-row" onClick={onOpen}>
+        <span className={`score score--${scoreTone(r.check)}`} title="Оценка заявки, 0–100">{r.check.score}</span>
+        <span className="request-row__body">
+          <strong>{r.title}</strong>
+          <span className="muted small">{dateLong(r.startsAt)} · {r.venue}, {r.city}</span>
+          <span className="muted small">
+            Продавцов: {r.sellers.length}
+            {receipts > 0 && ` · чеков: ${receipts}`} · заявка {dateTime(r.createdAt)}
+          </span>
+        </span>
+        <span className="btn btn--ghost btn--sm">Проверить</span>
+      </button>
+    </li>
+  );
+}
+
+function EventRequestForm({ request: r, catalog, onDone }: { request: EventRequest; catalog: EventItem[]; onDone(): void }) {
   const [mode, setMode] = useState<Mode>('add');
   const [checked, setChecked] = useState<boolean[]>(CHECKLIST.map(() => false));
   const [card, setCard] = useState<EventCardInput>({
@@ -146,19 +189,11 @@ function EventRequestCard({ request: r, catalog, onDone }: { request: EventReque
   }
 
   return (
-    <article className="panel agg">
-      <header className="agg__head">
-        <div>
-          <h3>{r.title}</h3>
-          <p className="muted small">{dateLong(r.startsAt)} · {r.venue}, {r.city}</p>
-        </div>
-        <div className="review__badges">
-          <span className={`score score--${r.check.score >= 70 ? 'ok' : r.check.suspicious ? 'bad' : 'warn'}`} title="Оценка заявки, 0–100">
-            {r.check.score}
-          </span>
-          <span className="badge badge--info">Продавцов: {r.sellers.length}</span>
-        </div>
-      </header>
+    <div className="request-form">
+      <div className="review__badges request-form__badges">
+        <span className={`score score--${scoreTone(r.check)}`} title="Оценка заявки, 0–100">{r.check.score}</span>
+        <span className="badge badge--info">Продавцов: {r.sellers.length}</span>
+      </div>
 
       <ul className="signals small">
         {r.check.signals.map((sig) => (
@@ -176,7 +211,14 @@ function EventRequestCard({ request: r, catalog, onDone }: { request: EventReque
           ))}
         </dd>
         <dt>Просят</dt>
-        <dd>{r.sellers.map((x) => x.sellerEmail).join(', ')}</dd>
+        <dd>
+          {r.sellers.map((x) => (
+            <span key={x.sellRequestId} className="seller-chip">
+              {x.sellerEmail}
+              {x.hasReceipt && <span className="ok-text small" title="Продавец приложил чек покупки"> · чек</span>}
+            </span>
+          ))}
+        </dd>
         <dt>Заявка</dt>
         <dd>{dateTime(r.createdAt)}</dd>
       </dl>
@@ -299,6 +341,6 @@ function EventRequestCard({ request: r, catalog, onDone }: { request: EventReque
           </div>
         </>
       )}
-    </article>
+    </div>
   );
 }

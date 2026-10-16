@@ -35,6 +35,7 @@ export function Sell() {
   const [custom, setCustom] = useState(false);
   const [form, setForm] = useState<Form>(EMPTY);
   const [file, setFile] = useState<File | null>(null);
+  const [receipt, setReceipt] = useState<File | null>(null);
   /** Проверка QR в файле билета: без читаемого QR дальше не пускаем. */
   const [qr, setQr] = useState<'idle' | 'checking' | 'found' | 'missing' | 'broken'>('idle');
   const payoutMethod = useAsync(() => api.myPayoutMethod(), []);
@@ -126,6 +127,7 @@ export function Sell() {
           purchaseEmail: form.purchaseEmail,
           boughtAt: form.boughtAt === 'other' ? form.boughtOther.trim() : form.boughtAt,
           ticketFile: file ?? undefined,
+          receiptFile: receipt ?? undefined,
           seat: { sector: form.sector.trim(), row: form.row.trim() || undefined, place: form.place.trim() || undefined },
           faceValue: rubToKopecks(form.faceValue),
         }),
@@ -157,7 +159,7 @@ export function Sell() {
           </p>
           <div className="actions center">
             <Link to="/account?tab=sell" className="btn btn--primary">Мои продажи</Link>
-            <button className="btn btn--ghost" onClick={() => { setDone(null); setStep(0); setEvent(null); setCustom(false); setFile(null); setQr('idle'); setAgree(false); setForm({ ...EMPTY, purchaseEmail: user.email }); }}>
+            <button className="btn btn--ghost" onClick={() => { setDone(null); setStep(0); setEvent(null); setCustom(false); setFile(null); setReceipt(null); setQr('idle'); setAgree(false); setForm({ ...EMPTY, purchaseEmail: user.email }); }}>
               Продать ещё
             </button>
           </div>
@@ -282,6 +284,15 @@ export function Sell() {
                   )}
                   {qr === 'broken' && <small className="bad-text">Не получилось открыть файл. Попробуйте другой PDF или фото.</small>}
                 </label>
+                <label className="field">
+                  <span>Чек или письмо о покупке <small className="muted">— необязательно</small></span>
+                  <input className="input" type="file" accept=".pdf,image/*" onChange={(e) => setReceipt(e.target.files?.[0] ?? null)} />
+                  <small className="muted">
+                    {receipt
+                      ? `Приложено: ${receipt.name}`
+                      : 'Чек, подтверждение оплаты или скриншот письма из кассы. Проверим быстрее и охотнее одобрим.'}
+                  </small>
+                </label>
                 <label className="check">
                   <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
                   <span>Билет мой, и я не передавал его другим</span>
@@ -297,6 +308,7 @@ export function Sell() {
               <dt>Концерт</dt><dd>{custom ? `${form.title}, ${form.city}` : event?.title}</dd>
               <dt>Билет</dt><dd>{seatLabel({ sector: form.sector, row: form.row || undefined, place: form.place || undefined })}</dd>
               <dt>Заказ</dt><dd>{form.orderNumber} · {form.purchaseEmail}</dd>
+              {noOrganizer && <><dt>Чек</dt><dd>{receipt ? receipt.name : <span className="muted">не приложен</span>}</dd></>}
               <dt>Цена</dt><dd><b>{money(rubToKopecks(form.faceValue))}</b></dd>
               <dt>Выплата</dt>
               <dd>

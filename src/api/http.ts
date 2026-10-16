@@ -156,10 +156,11 @@ export const httpApi: Api = {
   addDisputeMessage: (orderId, text, files) =>
     req('POST', `/orders/${orderId}/dispute/messages`, { body: disputeForm(text, files) }),
 
-  createSellRequest: ({ ticketFile, ...input }) => {
+  createSellRequest: ({ ticketFile, receiptFile, ...input }) => {
     const form = new FormData();
     form.append('data', new Blob([JSON.stringify(input)], { type: 'application/json' }));
     if (ticketFile) form.append('ticketFile', ticketFile, ticketFile.name);
+    if (receiptFile) form.append('receiptFile', receiptFile, receiptFile.name);
     return req('POST', '/sell-requests', { body: form });
   },
   mySellRequests: () => req('GET', '/users/me/sell-requests'),

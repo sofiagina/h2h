@@ -71,8 +71,10 @@ type EventRow = Omit<
 type OfferRow = Offer & { state: 'available' | 'reserved' | 'sold' };
 /** endedAt — когда заказ стал FAILED или EXPIRED: нужно для ленты уведомлений. */
 type OrderRow = Order & { userId: string; paidAt?: string; issuedAt?: string; endedAt?: string };
-type SellRow = Omit<AdminSellRequest, 'payout' | 'disputeOrderId' | 'disputeStatus' | 'check' | 'seller'> & {
+type SellRow = Omit<AdminSellRequest, 'payout' | 'disputeOrderId' | 'disputeStatus' | 'check' | 'seller' | 'receiptFileName'> & {
   userId: string;
+  /** Чек покупки — необязательный файл от продавца. */
+  receiptFileName?: string | null;
   /** SHA-256 файла билета: тот же файл во второй заявке — копия. */
   ticketFileHash?: string;
   ticketFileType?: string;
@@ -343,7 +345,7 @@ function seed(): DB {
       {
         id: id('sr'), userId: 'seed', sellerEmail: 'seller@example.test', event: waitRef(hor), seat: { sector: 'Партер', row: '6', place: '10' },
         faceValue: 120000, orderNumber: 'DK-48211', status: 'event_review', guarantee: 'escrow', createdAt: hor.createdAt,
-        purchaseEmail: 'seller@example.test', boughtAt: 'Кассир.ру', sourceUrl: hor.sourceUrls[0], ticketFileName: 'bilet.pdf',
+        purchaseEmail: 'seller@example.test', boughtAt: 'Кассир.ру', sourceUrl: hor.sourceUrls[0], ticketFileName: 'bilet.pdf', receiptFileName: 'chek-kassir.pdf',
         eventIsNew: true, payout: { method: 'sbp', details: '+7 ••• •••-45-12, Сбербанк' },
         ticketFileType: 'application/pdf', eventRequestId: hor.id, ticketQrHash: 'seed-qr-hor-1',
       },
@@ -593,6 +595,7 @@ function checkOf(s: SellRow, seller: SellerHistory): SellCheck {
   else if (s.ticketFileName) add(true, 'Файл билета — фото: проверьте, что это не картинка из интернета', 5);
   else if (s.eventIsNew) add(false, 'Файла билета нет', -20);
 
+  if (s.receiptFileName) add(true, 'Приложен чек покупки', 10);
   const orderProblem = orderNumberProblem(s.orderNumber);
   if (orderProblem) add(false, `Номер заказа «${s.orderNumber}» выглядит выдуманным`, -15);
   else add(true, 'Номер заказа похож на настоящий', 10);
@@ -614,7 +617,7 @@ function toAdminSell(s: SellRow): AdminSellRequest {
   const seller = sellerHistory(s.userId);
   return {
     ...toSellRequest(s), sellerEmail: s.sellerEmail, purchaseEmail: s.purchaseEmail, boughtAt: s.boughtAt,
-    sourceUrl: s.sourceUrl, ticketFileName: s.ticketFileName, eventIsNew: s.eventIsNew,
+    sourceUrl: s.sourceUrl, ticketFileName: s.ticketFileName, receiptFileName: s.receiptFileName ?? null, eventIsNew: s.eventIsNew,
     check: checkOf(s, seller), seller,
   };
 }
@@ -670,6 +673,8 @@ function eventCheckOf(r: EventRequestRow, rows: SellRow[]): SellCheck {
   if (best?.ok && best.known) add(true, `Ссылка на билетный сервис: ${best.known}`, 30);
   else if (best?.ok) add(true, `Ссылка на сайт ${best.host} — сверьте название, дату и площадку`, 10);
   for (const v of verdicts) if (!v.ok) add(false, `Ссылка: ${v.reason.charAt(0).toLowerCase()}${v.reason.slice(1)}`, -40);
+  const receipts = rows.filter((x) => x.receiptFileName).length;
+  if (receipts) add(true, `Чеков покупки приложено: ${receipts}`, 10);
   const sellers = new Set(rows.map((x) => x.userId)).size;
   if (sellers > 1) add(true, `Концерт просят ${sellers} продавца — скорее всего настоящий`, 10 * Math.min(3, sellers - 1));
   if ((Date.parse(r.startsAt) - Date.now()) / DAY > 365) add(false, 'Концерт больше чем через год', -10);
@@ -684,7 +689,7 @@ function toEventRequest(r: EventRequestRow): EventRequest {
   const rows = db.sell.filter((x) => x.eventRequestId === r.id && (r.status !== 'pending' || x.status === 'event_review'));
   return {
     ...r,
-    sellers: rows.map((x) => ({ sellRequestId: x.id, sellerEmail: x.sellerEmail, createdAt: x.createdAt })),
+    sellers: rows.map((x) => ({ sellRequestId: x.id, sellerEmail: x.sellerEmail, createdAt: x.createdAt, hasReceipt: !!x.receiptFileName })),
     check: eventCheckOf(r, rows),
   };
 }
@@ -1140,7 +1145,8 @@ export const mockApi: Api = {
     const row: SellRow = {
       id: id('sr'), userId: user.id, sellerEmail: user.email, event: target.ref, seat: input.seat, faceValue: input.faceValue,
       orderNumber: input.orderNumber.trim(), purchaseEmail: input.purchaseEmail.trim(), boughtAt: input.boughtAt.trim(),
-      sourceUrl: input.newEvent?.sourceUrl.trim() ?? null, ticketFileName: input.ticketFile?.name ?? null, eventIsNew: !!input.newEvent,
+      sourceUrl: input.newEvent?.sourceUrl.trim() ?? null, ticketFileName: input.ticketFile?.name ?? null,
+      receiptFileName: input.receiptFile?.name ?? null, eventIsNew: !!input.newEvent,
       ticketFileHash: fileHash, ticketQrHash: qrHash, ticketFileType: input.ticketFile?.type,
       guarantee: target.guarantee, status: target.status, eventRequestId: target.requestId,
       createdAt: now(),

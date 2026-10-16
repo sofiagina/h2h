@@ -207,7 +207,7 @@ export interface EventRequest {
   startsAt: string;
   sourceUrls: string[];
   /** Продавцы, чьи билеты ждут этот концерт. */
-  sellers: { sellRequestId: string; sellerEmail: string; createdAt: string }[];
+  sellers: { sellRequestId: string; sellerEmail: string; createdAt: string; hasReceipt: boolean }[];
   /** Проверка ссылок — те же сигналы, что у заявок на билеты. */
   check: SellCheck;
   createdAt: string;
@@ -274,6 +274,7 @@ export interface AdminSellRequest extends SellRequest {
   boughtAt: string;
   sourceUrl: string | null;
   ticketFileName: string | null;
+  receiptFileName: string | null;
   eventIsNew: boolean;
   check: SellCheck;
   seller: SellerHistory;
@@ -287,6 +288,8 @@ export interface SellRequestInput {
   purchaseEmail: string;
   boughtAt: string;
   ticketFile?: File;
+  /** Чек или письмо о покупке — необязательно, но ускоряет проверку. */
+  receiptFile?: File;
   seat: Seat;
   faceValue: Money;
 }

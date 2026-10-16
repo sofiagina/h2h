@@ -582,6 +582,21 @@ select option { background: var(--surface); color: var(--ink); }
 .profile__menu a.profile__notices { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; text-align: center; }
 
+/* Окно поверх страницы */
+.modal { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); overflow: hidden; }
+.modal::backdrop { background: rgb(0 0 0 / 55%); backdrop-filter: blur(2px); }
+.modal__body { display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
+.modal__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+.modal__head h2 { margin: 0; }
+.modal__head p { margin: 2px 0 0; }
+.modal__close { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border: 0; border-radius: 10px; background: var(--bg); color: var(--ink-2); cursor: pointer; }
+.modal__close:hover { color: var(--ink); }
+.modal__content { padding: 18px 20px 20px; overflow-y: auto; }
+@media (max-width: 560px) {
+  .modal { width: 100vw; max-width: 100vw; max-height: 100vh; border: 0; border-radius: 0; }
+  .modal__body { max-height: 100vh; }
+}
+
 /* Выплаты в профиле */
 .narrow-panel { max-width: 640px; }
 .payout-current { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 14px; }
@@ -594,6 +609,11 @@ select option { background: var(--surface); color: var(--ink); }
 .score--bad { background: var(--bad-soft); color: var(--bad); }
 .signals { list-style: none; margin: 0 0 12px; padding: 10px 12px; display: grid; gap: 4px; border-radius: 10px; background: var(--bg); }
 .signals li { font-weight: 500; }
+.request-row { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; align-items: center; }
+.request-row:hover { border-color: var(--line-strong); }
+.request-row__body { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.request-form__badges { justify-content: flex-start; margin-bottom: 12px; }
+.seller-chip { display: inline-block; margin-right: 10px; }
 .checklist { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 2px; margin: 0 0 14px; }
 .checklist legend { padding: 0 6px; }
 .checklist .check { margin: 6px 0 10px; font-weight: 500; }

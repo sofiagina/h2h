@@ -473,6 +473,12 @@ paths:
                 ticketFile:
                   type: string
                   format: binary
+                receiptFile:
+                  type: string
+                  format: binary
+                  description: >
+                    Необязательно: чек, подтверждение оплаты или скриншот письма из кассы.
+                    Повышает оценку заявки (+10) и видно модератору. QR в нём не требуется.
       responses:
         "200":
           description: Заявка создана
@@ -1210,13 +1216,14 @@ components:
       allOf:
         - $ref: "#/components/schemas/SellRequest"
         - type: object
-          required: [sellerEmail, purchaseEmail, boughtAt, sourceUrl, ticketFileName, eventIsNew, check, seller]
+          required: [sellerEmail, purchaseEmail, boughtAt, sourceUrl, ticketFileName, receiptFileName, eventIsNew, check, seller]
           properties:
             sellerEmail: { type: string }
             purchaseEmail: { type: string }
             boughtAt: { type: string }
             sourceUrl: { type: [string, "null"] }
             ticketFileName: { type: [string, "null"] }
+            receiptFileName: { type: [string, "null"], description: "Чек покупки, если продавец приложил." }
             eventIsNew: { type: boolean }
             check: { $ref: "#/components/schemas/SellCheck" }
             seller: { $ref: "#/components/schemas/SellerHistory" }
@@ -1266,11 +1273,12 @@ components:
           type: array
           items:
             type: object
-            required: [sellRequestId, sellerEmail, createdAt]
+            required: [sellRequestId, sellerEmail, createdAt, hasReceipt]
             properties:
               sellRequestId: { type: string }
               sellerEmail: { type: string }
               createdAt: { type: string, format: date-time }
+              hasReceipt: { type: boolean, description: Продавец приложил чек покупки. }
         check:
           $ref: "#/components/schemas/SellCheck"
         createdAt: { type: string, format: date-time }

@@ -327,6 +327,8 @@ function ReviewCard({ initial, onDone }: { initial: AdminSellRequest; onDone(): 
         <dt>Заказ</dt><dd>{s.orderNumber} · {s.purchaseEmail}</dd>
         <dt>Где купил</dt><dd>{s.boughtAt || '—'}</dd>
         <dt>Файл</dt><dd>{s.ticketFileName ?? '—'}</dd>
+        <dt>Чек покупки</dt>
+        <dd>{s.receiptFileName ? <span className="ok-text">{s.receiptFileName}</span> : <span className="muted">не приложен</span>}</dd>
         <dt>Страница</dt>
         <dd>{s.sourceUrl ? <a href={s.sourceUrl} target="_blank" rel="noreferrer noopener">{s.sourceUrl}</a> : '—'}</dd>
       </dl>
