@@ -9,6 +9,7 @@
 
 import { toDemoUrl, validateFiles } from '../lib/files';
 import { checkSourceUrl, NEW_EVENT_LIMITS, orderNumberProblem, TICKET_SELLERS } from '../lib/sourceCheck';
+import { findTicketQr } from '../lib/ticketQr';
 import { tokenStore } from './token';
 import {
   ApiError,
@@ -36,6 +37,7 @@ import {
   type Offer,
   type Order,
   type Payout,
+  type PayoutMethodInfo,
   type PayoutInput,
   type Seat,
   type SellRequest,
@@ -87,7 +89,10 @@ type SellRow = Omit<AdminSellRequest, 'payout' | 'disputeOrderId' | 'disputeStat
   listedAt?: string;
   /** Когда отклонили или сняли с продажи. */
   closedAt?: string;
-  payout: Pick<Payout, 'method' | 'details'>;
+  /** Реквизиты из заявок до переноса выплат в профиль — запасной вариант, если в профиле пусто. */
+  payout?: Pick<Payout, 'method' | 'details'>;
+  /** SHA-256 содержимого QR из файла: тот же QR в другой заявке — копия билета. */
+  ticketQrHash?: string;
 };
 /** Заявка на концерт; продавцы и проверка считаются из заявок на билеты. */
 type EventRequestRow = Omit<EventRequest, 'check' | 'sellers'>;
@@ -121,6 +126,8 @@ interface DB {
   orders: OrderRow[];
   sell: SellRow[];
   eventRequests: EventRequestRow[];
+  /** Реквизиты выплаты по пользователям. */
+  payoutMethods: Record<string, PayoutMethodInfo>;
   waitlist: WaitRow[];
   aggregators: Aggregator[];
   audit: AuditRow[];
@@ -331,20 +338,21 @@ function seed(): DB {
     offers,
     orders: [],
     eventRequests: [hor, junk],
+    payoutMethods: {},
     sell: [
       {
         id: id('sr'), userId: 'seed', sellerEmail: 'seller@example.test', event: waitRef(hor), seat: { sector: 'Партер', row: '6', place: '10' },
         faceValue: 120000, orderNumber: 'DK-48211', status: 'event_review', guarantee: 'escrow', createdAt: hor.createdAt,
         purchaseEmail: 'seller@example.test', boughtAt: 'Кассир.ру', sourceUrl: hor.sourceUrls[0], ticketFileName: 'bilet.pdf',
         eventIsNew: true, payout: { method: 'sbp', details: '+7 ••• •••-45-12, Сбербанк' },
-        ticketFileType: 'application/pdf', eventRequestId: hor.id,
+        ticketFileType: 'application/pdf', eventRequestId: hor.id, ticketQrHash: 'seed-qr-hor-1',
       },
       {
         id: id('sr'), userId: 'seed_2', sellerEmail: 'olga@example.test', event: waitRef(hor), seat: { sector: 'Балкон', row: '2', place: '4' },
         faceValue: 90000, orderNumber: 'KS-551902', status: 'event_review', guarantee: 'escrow', createdAt: iso(new Date(t0 - 3600_000)),
         purchaseEmail: 'olga@example.test', boughtAt: 'Кассир.ру', sourceUrl: hor.sourceUrls[0], ticketFileName: 'hor.pdf',
         eventIsNew: true, payout: { method: 'card', details: 'карта •••• 4417' },
-        ticketFileType: 'application/pdf', eventRequestId: hor.id,
+        ticketFileType: 'application/pdf', eventRequestId: hor.id, ticketQrHash: 'seed-qr-hor-2',
       },
       {
         id: id('sr'), userId: 'seed_junk', sellerEmail: 'krutoi2011@example.test', event: waitRef(junk), seat: { sector: 'VIP' },
@@ -359,7 +367,7 @@ function seed(): DB {
             id: id('sr'), userId: 'seed', sellerEmail: 'seller@example.test', event: ref(kvartirnik), seat: { sector: 'Входной' },
             faceValue: 150000, orderNumber: 'TL-7730418', status: 'review' as const, guarantee: 'escrow' as const,
             createdAt: iso(new Date(t0 - 2 * 3600_000)), purchaseEmail: 'seller@example.test', boughtAt: 'Ticketland',
-            sourceUrl: null, ticketFileName: 'kvartirnik.pdf', ticketFileType: 'application/pdf', eventIsNew: false,
+            sourceUrl: null, ticketFileName: 'kvartirnik.pdf', ticketFileType: 'application/pdf', eventIsNew: false, ticketQrHash: 'seed-qr-kv',
             payout: { method: 'sbp' as const, details: '+7 ••• •••-45-12, Сбербанк' },
           }]
         : []),
@@ -397,6 +405,7 @@ function normalize(data: DB): DB {
   data.favorites ??= [];
   data.notificationsSeen ??= {};
   data.eventRequests ??= [];
+  data.payoutMethods ??= {};
   const known = new Set(data.events.map((e) => e.id));
   const missing = extraEvents().filter((e) => !known.has(e.id));
   if (missing.length) {
@@ -405,7 +414,7 @@ function normalize(data: DB): DB {
     data.offers.push(...extraOffers().filter((o) => ids.has(o.eventId)));
   }
   for (const s of data.sell as (SellRow & { payout: { phoneMasked?: string; bank?: string } })[]) {
-    if (s.payout.phoneMasked !== undefined) s.payout = { method: 'sbp', details: `${s.payout.phoneMasked}, ${s.payout.bank ?? ''}` };
+    if (s.payout?.phoneMasked !== undefined) s.payout = { method: 'sbp', details: `${s.payout.phoneMasked}, ${s.payout.bank ?? ''}` };
   }
   return data;
 }
@@ -511,15 +520,27 @@ const stripOffer = (o: OfferRow): Offer => {
 const saleOfOrder = (orderId: string) => db.sell.find((s) => s.orderId === orderId);
 
 /** Статус выплаты продавцу считаем из заказа, в котором продан билет. */
+/** Реквизиты продавца: из профиля, а у старых заявок — сохранённые в самой заявке. */
+function payoutMethodOf(s: SellRow): PayoutMethodInfo | null {
+  const own = db.payoutMethods[s.userId];
+  if (own) return own;
+  return s.payout?.method && s.payout.details ? { method: s.payout.method, details: s.payout.details, updatedAt: s.createdAt } : null;
+}
+
+const later = (a: string, b: string) => (a > b ? a : b);
+
 function payoutOf(s: SellRow): Payout {
   const order = s.orderId ? db.orders.find((o) => o.id === s.orderId) : undefined;
-  const base = { ...s.payout };
+  const pm = payoutMethodOf(s);
+  const base = { method: pm?.method ?? null, details: pm?.details ?? null };
   if (s.status === 'cancelled' || s.status === 'rejected') return { ...base, status: 'cancelled', at: null };
   if (!order || (order.status !== 'ISSUED' && order.status !== 'REFUNDED')) return { ...base, status: 'waiting', at: null };
   if (order.dispute?.status === 'refunded') return { ...base, status: 'cancelled', at: null };
   if (order.dispute?.status === 'open') return { ...base, status: 'frozen', at: null };
-  if (s.guarantee === 'organizer') return { ...base, status: 'sent', at: order.issuedAt ?? null };
-  const release = order.escrow!.releaseAt;
+  // Билет продан, а реквизитов нет: деньги ждут, пока продавец их укажет.
+  if (!pm) return { ...base, status: 'no_details', at: null };
+  if (s.guarantee === 'organizer') return { ...base, status: 'sent', at: later(order.issuedAt ?? now(), pm.updatedAt) };
+  const release = later(order.escrow!.releaseAt, pm.updatedAt);
   return { ...base, status: Date.now() > Date.parse(release) ? 'sent' : 'scheduled', at: release };
 }
 
@@ -566,6 +587,8 @@ function checkOf(s: SellRow, seller: SellerHistory): SellCheck {
     else if (v.known) add(true, `Ссылка на билетный сервис: ${v.known}`, 30);
     else add(true, `Ссылка на сайт ${v.host} — откройте и сверьте название и дату`, 10);
   }
+  if (s.ticketQrHash) add(true, 'QR-код в файле найден', 15);
+  else if (s.ticketFileName) add(false, 'QR-код в файле не найден', -25);
   if (s.ticketFileType === 'application/pdf' || s.ticketFileName?.toLowerCase().endsWith('.pdf')) add(true, 'Файл билета — PDF', 15);
   else if (s.ticketFileName) add(true, 'Файл билета — фото: проверьте, что это не картинка из интернета', 5);
   else if (s.eventIsNew) add(false, 'Файла билета нет', -20);
@@ -686,8 +709,8 @@ function pendingRequest(requestId: string) {
   return r;
 }
 
-async function sha256(file: File) {
-  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+async function sha256(data: ArrayBuffer) {
+  const digest = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
@@ -821,9 +844,13 @@ function notificationsOf(user: User): Draft[] {
     push(s.listedAt && { kind: 'sell_listed', title: 'Билет в продаже', text: t, at: s.listedAt, target: sell });
     push(s.status === 'rejected' && { kind: 'sell_rejected', title: 'Заявка отклонена', text: s.rejectReason ?? t, at: s.closedAt ?? s.createdAt, target: sell });
     push(s.status === 'cancelled' && { kind: 'sell_cancelled', title: 'Вы сняли билет с продажи', text: t, at: s.closedAt ?? s.createdAt, target: sell });
-    push(order?.paidAt && { kind: 'sell_sold', title: 'Билет купили', text: `${t}: ${rub(s.faceValue)}`, at: order.paidAt, target: sell });
+    push(order?.paidAt && {
+      kind: 'sell_sold', title: 'Билет купили',
+      text: payoutMethodOf(s) ? `${t}: ${rub(s.faceValue)}` : `${t}: ${rub(s.faceValue)}. Укажите реквизиты в профиле, чтобы получить деньги`,
+      at: order.paidAt, target: sell,
+    });
     const payout = payoutOf(s);
-    push(payout.status === 'sent' && payout.at && { kind: 'payout_sent', title: 'Деньги отправлены', text: `${rub(s.faceValue)} → ${s.payout.details}`, at: payout.at, target: sell });
+    push(payout.status === 'sent' && payout.at && { kind: 'payout_sent', title: 'Деньги отправлены', text: `${rub(s.faceValue)} → ${payout.details}`, at: payout.at, target: sell });
   }
 
   // Споры: покупатель и продавец видят ответы друг друга и решение поддержки.
@@ -1037,12 +1064,22 @@ export const mockApi: Api = {
     if (!EMAIL_RE.test(input.purchaseEmail)) throw new ApiError('INVALID', 'Укажите email, на который покупали билет');
     if (!input.seat.sector.trim()) throw new ApiError('INVALID', 'Укажите сектор или тип билета');
     if (!(input.faceValue >= 10000)) throw new ApiError('INVALID', 'Номинал от 100 ₽');
-    const payoutDetails = describePayout(input.payout);
 
-    // Тот же файл билета в другой живой заявке — копия, а не второй билет.
-    const fileHash = input.ticketFile ? await sha256(input.ticketFile) : undefined;
-    if (fileHash && db.sell.some((x) => x.ticketFileHash === fileHash && x.status !== 'cancelled' && !(x.userId === user.id && x.status === 'rejected')))
+    // Тот же файл или тот же QR в другой живой заявке — копия, а не второй билет.
+    const live = (x: SellRow) => x.status !== 'cancelled' && !(x.userId === user.id && x.status === 'rejected');
+    const fileHash = input.ticketFile ? await sha256(await input.ticketFile.arrayBuffer()) : undefined;
+    if (fileHash && db.sell.some((x) => x.ticketFileHash === fileHash && live(x)))
       throw new ApiError('DUPLICATE_TICKET', 'Этот файл билета уже загружали в другой заявке. Приложите свой билет.', 409);
+    let qrHash: string | undefined;
+    if (input.ticketFile) {
+      const qr = await findTicketQr(input.ticketFile).catch(() => {
+        throw new ApiError('INVALID_FILE', 'Не получилось открыть файл. Загрузите PDF из письма с билетом или чёткое фото.');
+      });
+      if (!qr.found) throw new ApiError('NO_QR', 'В файле не нашли QR-код. Загрузите оригинальный билет, где QR виден целиком и чётко.');
+      qrHash = await sha256(new TextEncoder().encode(qr.text).buffer as ArrayBuffer);
+      if (db.sell.some((x) => x.ticketQrHash === qrHash && live(x)))
+        throw new ApiError('DUPLICATE_TICKET', 'Билет с этим QR-кодом уже выставлен. Один билет можно продать только один раз.', 409);
+    }
 
     let target: { ref: EventRef; guarantee: Guarantee; status: SellRow['status']; requestId?: string };
     if (input.newEvent) {
@@ -1104,9 +1141,8 @@ export const mockApi: Api = {
       id: id('sr'), userId: user.id, sellerEmail: user.email, event: target.ref, seat: input.seat, faceValue: input.faceValue,
       orderNumber: input.orderNumber.trim(), purchaseEmail: input.purchaseEmail.trim(), boughtAt: input.boughtAt.trim(),
       sourceUrl: input.newEvent?.sourceUrl.trim() ?? null, ticketFileName: input.ticketFile?.name ?? null, eventIsNew: !!input.newEvent,
-      ticketFileHash: fileHash, ticketFileType: input.ticketFile?.type,
+      ticketFileHash: fileHash, ticketQrHash: qrHash, ticketFileType: input.ticketFile?.type,
       guarantee: target.guarantee, status: target.status, eventRequestId: target.requestId,
-      payout: { method: input.payout.method, details: payoutDetails },
       createdAt: now(),
     };
     db.sell.unshift(row);
@@ -1157,6 +1193,22 @@ export const mockApi: Api = {
     const user = currentUser();
     db.notificationsSeen[user.id] = now();
     save();
+  },
+
+  async myPayoutMethod() {
+    await delay(150);
+    const user = currentUser();
+    return db.payoutMethods[user.id] ?? null;
+  },
+
+  async setPayoutMethod(input) {
+    await delay(400);
+    const user = currentUser();
+    const info: PayoutMethodInfo = { method: input.method, details: describePayout(input), updatedAt: now() };
+    db.payoutMethods[user.id] = info;
+    db.audit.push({ at: info.updatedAt, userId: user.id, action: 'payout:set', target: user.id, reason: info.method });
+    save();
+    return info;
   },
 
   async joinWaitlist(eventId) {

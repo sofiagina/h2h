@@ -77,7 +77,14 @@ npm run dev
 | Статус заявки продавца | `pending` → `listed` → `sold` | `review` → `listed` → `sold` или `rejected` с причиной |
 
 Статус выплаты (`payout.status`): `waiting` → `scheduled` / `sent`; при открытом споре — `frozen`, при возврате
-покупателю — `cancelled`.
+покупателю — `cancelled`; билет продан, а реквизитов нет — `no_details` (деньги ждут).
+
+Реквизиты выплаты — в профиле («Мои билеты» → «Выплаты», `PUT /users/me/payout-method`), одни на все продажи.
+В заявке на продажу их нет: выставить билет можно и без реквизитов.
+
+Файл билета (концерты без организатора) обязан содержать QR-код: фронт ищет его сразу при выборе файла
+(`src/lib/ticketQr.ts`: pdf.js + jsQR), бэкенд проверяет повторно — `NO_QR`, `INVALID_FILE`, тот же QR
+в другой заявке — `DUPLICATE_TICKET`.
 
 ## Споры
 
@@ -124,7 +131,8 @@ npm run dev
 | GET | `/orders/{id}/dispute` | → `DisputeView` (`order`, `dispute`, `viewer`, `canWrite`) |
 | POST | `/orders/{id}/dispute/messages` | **multipart**: `text`, `files[]` → `DisputeView` |
 | GET | `/users/me/orders` · `/users/me/sell-requests` · `/users/me/waitlist` | списки для кабинета |
-| POST | `/sell-requests` | **multipart**: `data` (JSON `SellRequestInput` без файла; `eventId` **или** `newEvent`; `payout` — `{ method: 'sbp', phone, bank }` · `{ method: 'card', cardToken, cardLast4 }` · `{ method: 'account', holder, bik, account }`), `ticketFile` → `SellRequest` |
+| POST | `/sell-requests` | **multipart**: `data` (JSON `SellRequestInput` без файла; `eventId` **или** `newEvent`), `ticketFile` (с QR) → `SellRequest` |
+| GET · PUT | `/users/me/payout-method` | реквизиты выплаты: `{ method: 'sbp', phone, bank }` · `{ method: 'card', cardToken, cardLast4 }` · `{ method: 'account', holder, bik, account }` → `PayoutMethodInfo` (только маска); GET без реквизитов → 204 |
 | POST | `/sell-requests/{id}/cancel` | снять своё объявление, пока билет не купили → `SellRequest` (`status: cancelled`); `409 ALREADY_SOLD` / `RESERVED` (билет сейчас оплачивают) / `INVALID` (уже закрыто) |
 | GET | `/users/me/notifications` | → `{ items: AppNotification[], unread }`: оплата, билет готов, не удалось, бронь истекла, в продаже, отклонено, снято, продано, выплата, спор; новые сверху, до 50 |
 | POST | `/users/me/notifications/read` | всё прочитано → 204 |

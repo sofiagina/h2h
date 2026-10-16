@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
 import { AnimatePresence, m } from 'motion/react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
-import { api, USE_MOCK, type EventItem, type PayoutInput, type PayoutMethod, type SellRequest } from '../api';
+import { api, type EventItem, type SellRequest } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { Select } from '../components/Select';
 import { checkSourceUrl, orderNumberProblem, TICKET_SELLERS } from '../lib/sourceCheck';
@@ -10,31 +10,11 @@ import { dateLong, money, seatLabel } from '../lib/format';
 import { spring, stepSlide } from '../lib/motion';
 import { useAsync } from '../lib/useAsync';
 
-const BANKS = ['Сбербанк', 'Т-Банк', 'ВТБ', 'Альфа-Банк', 'Газпромбанк', 'Райффайзенбанк', 'Озон Банк', 'Другой банк'];
-const STEPS = ['Концерт', 'Билет', 'Куда перевести деньги', 'Проверка'];
-const METHODS: [PayoutMethod, string, string][] = [
-  ['sbp', 'СБП', 'по номеру телефона'],
-  ['card', 'Карта', 'любого банка'],
-  ['account', 'Счёт', 'по реквизитам'],
-];
-
-const digits = (v: string) => v.replace(/\D/g, '');
-/** Проверка номера карты по алгоритму Луна — ловит опечатки до отправки. */
-function luhn(num: string) {
-  let sum = 0;
-  for (let i = 0; i < num.length; i++) {
-    let d = Number(num[num.length - 1 - i]);
-    if (i % 2) d = d * 2 > 9 ? d * 2 - 9 : d * 2;
-    sum += d;
-  }
-  return num.length >= 16 && sum % 10 === 0;
-}
-const formatCard = (v: string) => digits(v).slice(0, 19).replace(/(\d{4})(?=\d)/g, '$1 ');
-
+const STEPS = ['Концерт', 'Билет', 'Проверка'];
+const LAST = STEPS.length - 1;
 const EMPTY = {
   orderNumber: '', purchaseEmail: '', boughtAt: '', boughtOther: '', sector: '', row: '', place: '', faceValue: '',
-  title: '', city: '', venue: '', startsAt: '', sourceUrl: '', phone: '', bank: '',
-  card: '', holder: '', bik: '', account: '',
+  title: '', city: '', venue: '', startsAt: '', sourceUrl: '',
 };
 type Form = typeof EMPTY;
 
@@ -51,11 +31,13 @@ export function Sell() {
   const [step, setStep] = useState(0);
   /** Направление анимации шага: 1 — вперёд, -1 — назад. */
   const [dir, setDir] = useState(1);
-  const [method, setMethod] = useState<PayoutMethod>('sbp');
   const [event, setEvent] = useState<EventItem | null>(null);
   const [custom, setCustom] = useState(false);
   const [form, setForm] = useState<Form>(EMPTY);
   const [file, setFile] = useState<File | null>(null);
+  /** Проверка QR в файле билета: без читаемого QR дальше не пускаем. */
+  const [qr, setQr] = useState<'idle' | 'checking' | 'found' | 'missing' | 'broken'>('idle');
+  const payoutMethod = useAsync(() => api.myPayoutMethod(), []);
   const [agree, setAgree] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -99,15 +81,9 @@ export function Sell() {
       if (!form.boughtAt || (form.boughtAt === 'other' && form.boughtOther.trim().length < 3)) return 'Укажите, где покупали билет';
       if (rubToKopecks(form.faceValue) < 10000) return 'Номинал от 100 ₽';
       if (noOrganizer && !file) return 'Приложите файл билета';
+      if (noOrganizer && qr === 'checking') return 'Ищем QR-код в файле, секунду…';
+      if (noOrganizer && qr !== 'found') return 'В файле нет читаемого QR-кода — загрузите оригинальный билет';
       if (noOrganizer && !agree) return 'Подтвердите, что не передавали билет другим';
-    }
-    if (s === 2) {
-      if (method === 'sbp' && digits(form.phone).length < 11) return 'Укажите телефон, привязанный к СБП';
-      if (method === 'sbp' && !form.bank) return 'Выберите банк';
-      if (method === 'card' && !luhn(digits(form.card))) return 'Проверьте номер карты';
-      if (method === 'account' && !/\p{L}{2,}.*\s+\p{L}{2,}/u.test(form.holder)) return 'Укажите ФИО получателя, как в банке';
-      if (method === 'account' && digits(form.bik).length !== 9) return 'БИК из 9 цифр';
-      if (method === 'account' && digits(form.account).length !== 20) return 'Номер счёта из 20 цифр';
     }
     return null;
   }
@@ -122,19 +98,19 @@ export function Sell() {
     }
   }
 
-  function payoutInput(): PayoutInput {
-    if (method === 'sbp') return { method, phone: form.phone, bank: form.bank };
-    // В бою номер карты принимает форма платёжного сервиса и отдаёт токен; в демо токен условный.
-    if (method === 'card') return { method, cardToken: `demo_${crypto.randomUUID()}`, cardLast4: digits(form.card).slice(-4) };
-    return { method, holder: form.holder.trim(), bik: digits(form.bik), account: digits(form.account) };
+  async function pickFile(next: File | null) {
+    setFile(next);
+    setStepError(null);
+    if (!next) return setQr('idle');
+    setQr('checking');
+    try {
+      const { findTicketQr } = await import('../lib/ticketQr');
+      const result = await findTicketQr(next);
+      setQr(result.found ? 'found' : 'missing');
+    } catch {
+      setQr('broken');
+    }
   }
-
-  const payoutText =
-    method === 'sbp'
-      ? `СБП, ${form.bank}, ${form.phone}`
-      : method === 'card'
-        ? `карта •••• ${digits(form.card).slice(-4)}`
-        : `счёт •••• ${digits(form.account).slice(-4)}, ${form.holder}`;
 
   async function submit() {
     setBusy(true);
@@ -152,7 +128,6 @@ export function Sell() {
           ticketFile: file ?? undefined,
           seat: { sector: form.sector.trim(), row: form.row.trim() || undefined, place: form.place.trim() || undefined },
           faceValue: rubToKopecks(form.faceValue),
-          payout: payoutInput(),
         }),
       );
     } catch (err) {
@@ -182,7 +157,7 @@ export function Sell() {
           </p>
           <div className="actions center">
             <Link to="/account?tab=sell" className="btn btn--primary">Мои продажи</Link>
-            <button className="btn btn--ghost" onClick={() => { setDone(null); setStep(0); setEvent(null); setCustom(false); setFile(null); setAgree(false); setMethod('sbp'); setForm({ ...EMPTY, purchaseEmail: user.email }); }}>
+            <button className="btn btn--ghost" onClick={() => { setDone(null); setStep(0); setEvent(null); setCustom(false); setFile(null); setQr('idle'); setAgree(false); setForm({ ...EMPTY, purchaseEmail: user.email }); }}>
               Продать ещё
             </button>
           </div>
@@ -296,7 +271,16 @@ export function Sell() {
               <>
                 <label className="field">
                   <span>Файл билета (PDF или фото)</span>
-                  <input className="input" type="file" accept=".pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+                  <input className="input" type="file" accept=".pdf,image/*" onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
+                  {qr === 'checking' && <small className="muted">Ищем QR-код в файле…</small>}
+                  {qr === 'found' && <small className="ok-text">✓ QR-код найден</small>}
+                  {qr === 'missing' && (
+                    <small className="bad-text">
+                      QR-код не нашли. Нужен оригинальный билет из письма или приложения — PDF или фото, где QR виден целиком
+                      и чётко. Скриншоты афиш и картинки из интернета не подойдут.
+                    </small>
+                  )}
+                  {qr === 'broken' && <small className="bad-text">Не получилось открыть файл. Попробуйте другой PDF или фото.</small>}
                 </label>
                 <label className="check">
                   <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
@@ -307,80 +291,27 @@ export function Sell() {
           </div>
         )}
 
-        {step === 2 && (
-          <div className="fields">
-            <div className="segmented" role="radiogroup" aria-label="Способ выплаты">
-              {METHODS.map(([m, title, hint]) => (
-                <button
-                  key={m}
-                  type="button"
-                  role="radio"
-                  aria-checked={method === m}
-                  className={method === m ? 'on' : ''}
-                  onClick={() => {
-                    setMethod(m);
-                    setStepError(null);
-                  }}
-                >
-                  <b>{title}</b>
-                  <small>{hint}</small>
-                </button>
-              ))}
-            </div>
-            {method === 'sbp' && (
-              <>
-                <label className="field"><span>Телефон, привязанный к СБП</span><input className="input" type="tel" value={form.phone} onChange={set('phone')} placeholder="+7 900 000-00-00" /></label>
-                <div className="field">
-                  <span>Банк</span>
-                  <Select
-                    label="Банк"
-                    placeholder="Выберите банк"
-                    value={form.bank}
-                    onChange={(bank) => setForm({ ...form, bank })}
-                    options={BANKS.map((b) => ({ value: b, label: b }))}
-                  />
-                </div>
-              </>
-            )}
-            {method === 'card' && (
-              <label className="field">
-                <span>Номер карты</span>
-                <input
-                  className="input"
-                  inputMode="numeric"
-                  autoComplete="cc-number"
-                  value={form.card}
-                  onChange={(e) => setForm({ ...form, card: formatCard(e.target.value) })}
-                  placeholder="0000 0000 0000 0000"
-                />
-                <small className="muted">
-                  {USE_MOCK
-                    ? 'Демо: сохраняем только последние 4 цифры.'
-                    : 'Номер вводится в форме платёжного сервиса.'}
-                </small>
-              </label>
-            )}
-            {method === 'account' && (
-              <>
-                <label className="field"><span>ФИО получателя</span><input className="input" autoComplete="name" value={form.holder} onChange={set('holder')} placeholder="Как в банке" /></label>
-                <div className="field-row">
-                  <label className="field"><span>БИК банка</span><input className="input" inputMode="numeric" maxLength={9} value={form.bik} onChange={set('bik')} /></label>
-                  <label className="field"><span>Номер счёта</span><input className="input" inputMode="numeric" maxLength={20} value={form.account} onChange={set('account')} placeholder="20 цифр" /></label>
-                </div>
-                <small className="muted">Перевод на счёт: 1–3 рабочих дня.</small>
-              </>
-            )}
-          </div>
-        )}
-
-        {step === 3 && (
+        {step === LAST && (
           <div className="review">
             <dl className="kv">
               <dt>Концерт</dt><dd>{custom ? `${form.title}, ${form.city}` : event?.title}</dd>
               <dt>Билет</dt><dd>{seatLabel({ sector: form.sector, row: form.row || undefined, place: form.place || undefined })}</dd>
               <dt>Заказ</dt><dd>{form.orderNumber} · {form.purchaseEmail}</dd>
               <dt>Цена</dt><dd><b>{money(rubToKopecks(form.faceValue))}</b></dd>
-              <dt>Выплата</dt><dd>{payoutText}</dd>
+              <dt>Выплата</dt>
+              <dd>
+                {payoutMethod.data ? (
+                  <>
+                    {payoutMethod.data.details} <Link to="/account?tab=payout" className="small">изменить</Link>
+                  </>
+                ) : (
+                  <span>
+                    <span className="bad-text">Реквизиты не указаны.</span>{' '}
+                    <Link to="/account?tab=payout" target="_blank" rel="noreferrer">Укажите в профиле</Link> — выставить
+                    можно и без них, но деньги придут после того, как добавите.
+                  </span>
+                )}
+              </dd>
               <dt>Когда</dt><dd>{noOrganizer ? 'на следующий день после концерта' : 'сразу после продажи'}</dd>
             </dl>
             {error && <ErrorBox error={error} />}
@@ -392,7 +323,7 @@ export function Sell() {
         {stepError && <p className="field-error">{stepError}</p>}
         <div className="actions">
           {step > 0 && <button type="button" className="btn btn--ghost" onClick={() => { setStepError(null); setDir(-1); setStep(step - 1); }}>Назад</button>}
-          {step < 3 ? (
+          {step < LAST ? (
             <button className="btn btn--primary">Далее</button>
           ) : (
             <button type="button" className="btn btn--primary" disabled={busy} onClick={submit}>

@@ -24,7 +24,8 @@ export type Guarantee = 'organizer' | 'escrow';
 /** open — выплата продавцу заморожена; refunded — деньги вернули покупателю; rejected — спор отклонён. */
 export type DisputeStatus = 'open' | 'refunded' | 'rejected';
 /** waiting — билет ещё не продан; scheduled — выплата по графику; frozen — заморожена спором. */
-export type PayoutStatus = 'waiting' | 'scheduled' | 'sent' | 'frozen' | 'cancelled';
+/** no_details — билет продан, но реквизиты в профиле не указаны: деньги ждут, пока продавец их добавит. */
+export type PayoutStatus = 'waiting' | 'no_details' | 'scheduled' | 'sent' | 'frozen' | 'cancelled';
 export type Role = 'customer' | 'admin';
 /** Раздел витрины: по нему плитки категорий на главной. */
 export type EventGroup = 'concerts' | 'festivals' | 'theatre' | 'standup' | 'classic' | 'kids' | 'sport' | 'club';
@@ -151,10 +152,18 @@ export interface DisputeView {
 /** sbp — по номеру телефона; card — на банковскую карту; account — на счёт по реквизитам. */
 export type PayoutMethod = 'sbp' | 'card' | 'account';
 
-export interface Payout {
+/** Реквизиты выплаты из профиля продавца — одни на все его продажи. */
+export interface PayoutMethodInfo {
   method: PayoutMethod;
   /** Замаскированные реквизиты для показа: «+7 ••• •••-12-34, Т-Банк», «•••• 4242», «•••• 1234, БИК 044525225». */
   details: string;
+  updatedAt: string;
+}
+
+export interface Payout {
+  /** null — реквизиты в профиле ещё не указаны. */
+  method: PayoutMethod | null;
+  details: string | null;
   status: PayoutStatus;
   /** Дата перевода — фактическая или плановая. */
   at: string | null;
@@ -280,9 +289,8 @@ export interface SellRequestInput {
   ticketFile?: File;
   seat: Seat;
   faceValue: Money;
-  /** Куда перевести деньги после продажи. */
-  payout: PayoutInput;
 }
+// Реквизиты выплаты в заявку не входят: они в профиле (setPayoutMethod).
 
 /**
  * Реквизиты выплаты. Номер карты в наш бэкенд не попадает: его принимает защищённая форма
@@ -432,6 +440,10 @@ export interface Api {
   cancelSellRequest(id: string): Promise<SellRequest>;
   myNotifications(): Promise<NotificationFeed>;
   markNotificationsRead(): Promise<void>;
+  /** null — реквизиты ещё не указаны. */
+  myPayoutMethod(): Promise<PayoutMethodInfo | null>;
+  /** Сохраняет или заменяет реквизиты; ждущие выплаты уходят по ним. */
+  setPayoutMethod(input: PayoutInput): Promise<PayoutMethodInfo>;
   joinWaitlist(eventId: string): Promise<WaitlistEntry>;
   myWaitlist(): Promise<WaitlistEntry[]>;
   setFavorite(eventId: string, on: boolean): Promise<void>;

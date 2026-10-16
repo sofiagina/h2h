@@ -1,5 +1,5 @@
 import { tokenStore } from './token';
-import { ApiError, type Api, type OtpChallenge, type User } from './types';
+import { ApiError, type Api, type OtpChallenge, type PayoutMethodInfo, type User } from './types';
 
 const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api/v1`;
 
@@ -166,6 +166,9 @@ export const httpApi: Api = {
   cancelSellRequest: (id) => req('POST', `/sell-requests/${id}/cancel`),
   myNotifications: () => req('GET', '/users/me/notifications'),
   markNotificationsRead: () => req('POST', '/users/me/notifications/read'),
+  // 204 — реквизитов ещё нет.
+  myPayoutMethod: async () => (await req<PayoutMethodInfo | undefined>('GET', '/users/me/payout-method')) ?? null,
+  setPayoutMethod: (input) => req('PUT', '/users/me/payout-method', { body: input }),
   joinWaitlist: (eventId) => req('POST', `/events/${eventId}/waitlist`),
   myWaitlist: () => req('GET', '/users/me/waitlist'),
   setFavorite: (eventId, on) => req(on ? 'PUT' : 'DELETE', `/events/${eventId}/favorite`),

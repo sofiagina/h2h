@@ -93,6 +93,7 @@ export function ProfileMenu({ user, onLogout }: { user: User; onLogout(): void }
                   Уведомления
                   {unread > 0 && <span className="count">{unread}</span>}
                 </Link>
+                <Link to="/account?tab=payout" role="menuitem">Выплаты</Link>
               </>
             )}
             <button type="button" role="menuitem" className="profile__logout" onClick={onLogout}>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
-import { api, type AppNotification, type NotificationKind, type SellStatus } from '../api';
+import { api, type AppNotification, type NotificationKind, type PayoutMethodInfo, type SellStatus } from '../api';
+import { PayoutForm } from '../components/PayoutForm';
 import { useAuth } from '../auth/AuthContext';
 import { IconBell, IconCalendar, IconChat, IconShield, IconSwap, IconTicket, IconWallet } from '../components/icons';
 import { NOTIFICATIONS_READ } from '../lib/notifications';
@@ -13,6 +14,7 @@ const TABS = [
   ['sell', 'Мои продажи'],
   ['notifications', 'Уведомления'],
   ['waitlist', 'Жду билеты'],
+  ['payout', 'Выплаты'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -45,6 +47,7 @@ export function Account() {
       {tab === 'sell' && <SellList />}
       {tab === 'notifications' && <Notifications />}
       {tab === 'waitlist' && <Waitlist />}
+      {tab === 'payout' && <PayoutSettings />}
     </div>
   );
 }
@@ -103,13 +106,19 @@ function SellList() {
               <SellBadge status={s.status} />
             </div>
           </div>
-          {s.status !== 'rejected' && (
+          {s.status !== 'rejected' && s.status !== 'cancelled' && (
             <div className="payout-line small">
               <PayoutBadge status={s.payout.status} />
-              <span className="muted">
-                {{ sbp: 'СБП', card: 'Карта', account: 'Счёт' }[s.payout.method]}: {s.payout.details}
-                {s.payout.at && ` · ${s.payout.status === 'sent' ? 'отправлено' : 'план'} ${dateTime(s.payout.at)}`}
-              </span>
+              {s.payout.method ? (
+                <span className="muted">
+                  {METHOD_TITLE[s.payout.method]}: {s.payout.details}
+                  {s.payout.at && ` · ${s.payout.status === 'sent' ? 'отправлено' : 'план'} ${dateTime(s.payout.at)}`}
+                </span>
+              ) : (
+                <Link to="/account?tab=payout" className={s.payout.status === 'no_details' ? 'bad-text' : ''}>
+                  {s.payout.status === 'no_details' ? 'Деньги ждут: укажите реквизиты' : 'Укажите, куда перевести деньги'}
+                </Link>
+              )}
             </div>
           )}
           {s.rejectReason && <p className="small bad-text">Причина отказа: {s.rejectReason}</p>}
@@ -132,6 +141,36 @@ function SellList() {
         </li>
       ))}
     </ul>
+  );
+}
+
+const METHOD_TITLE = { sbp: 'СБП', card: 'Карта', account: 'Счёт' } as const;
+
+/** Реквизиты выплаты — одни на все продажи. */
+function PayoutSettings() {
+  const current = useAsync(() => api.myPayoutMethod(), []);
+  const [saved, setSaved] = useState<PayoutMethodInfo | null>(null);
+  if (current.error) return <ErrorBox error={current.error} onRetry={() => current.reload()} />;
+  // null в data — и «ещё грузится», и «реквизитов нет»: различаем по loading.
+  if (current.loading && !current.data) return <Spinner />;
+  const info = saved ?? current.data;
+  return (
+    <div className="panel narrow-panel">
+      <h2 className="h3">Куда переводить деньги</h2>
+      {info ? (
+        <p className="payout-current">
+          <span className="badge badge--ok">{METHOD_TITLE[info.method]}</span> {info.details}
+          <span className="muted small"> · изменено {dateTime(info.updatedAt)}</span>
+        </p>
+      ) : (
+        <p className="muted">
+          Реквизиты ещё не указаны. Продавать можно и без них, но деньги за проданный билет придут только после того, как вы их
+          добавите.
+        </p>
+      )}
+      {saved && <p className="ok-text small">Сохранено. Ждущие выплаты уйдут по этим реквизитам.</p>}
+      <PayoutForm current={info} onSaved={setSaved} />
+    </div>
   );
 }
 

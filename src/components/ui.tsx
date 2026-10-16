@@ -71,6 +71,7 @@ export const DisputeBadge = ({ status }: { status: DisputeStatus }) => <Badge la
 
 const PAYOUT: Record<PayoutStatus, [string, Tone]> = {
   waiting: ['Ждёт покупателя', 'muted'],
+  no_details: ['Укажите реквизиты', 'bad'],
   scheduled: ['Выплата запланирована', 'info'],
   sent: ['Деньги отправлены', 'ok'],
   frozen: ['Выплата на паузе', 'bad'],

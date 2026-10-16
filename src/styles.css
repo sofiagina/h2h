@@ -573,6 +573,10 @@ select option { background: var(--surface); color: var(--ink); }
 .profile__menu a.profile__notices { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; text-align: center; }
 
+/* Выплаты в профиле */
+.narrow-panel { max-width: 640px; }
+.payout-current { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 14px; }
+
 /* Модерация заявок */
 .review__badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .score { display: inline-grid; place-items: center; min-width: 40px; height: 32px; padding: 0 8px; border-radius: 10px; font-weight: 800; font-size: 15px; }
