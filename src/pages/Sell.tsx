@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
-import { AnimatePresence, m } from 'motion/react';
+import { m } from 'motion/react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api, type EventItem, type SellRequest } from '../api';
 import { useAuth } from '../auth/AuthContext';
@@ -183,8 +183,12 @@ export function Sell() {
       </div>
 
       <form className="panel" onSubmit={next}>
-        <AnimatePresence mode="wait" custom={dir} initial={false}>
-        <m.div key={step} custom={dir} variants={stepSlide} initial="enter" animate="center" exit="exit">
+        {/*
+          Без AnimatePresence: с mode="wait" новый шаг ждёт конца анимации ухода старого,
+          и если шаг меняется сразу после загрузки (пришли со ссылки ?event=...), ожидание
+          зависает — прогресс показывает второй шаг, а на экране остаётся первый.
+        */}
+        <m.div key={step} custom={dir} variants={stepSlide} initial="enter" animate="center">
         {step === 0 && (
           <>
             {event || custom ? (
@@ -331,7 +335,6 @@ export function Sell() {
         )}
 
         </m.div>
-        </AnimatePresence>
         {stepError && <p className="field-error">{stepError}</p>}
         <div className="actions">
           {step > 0 && <button type="button" className="btn btn--ghost" onClick={() => { setStepError(null); setDir(-1); setStep(step - 1); }}>Назад</button>}
