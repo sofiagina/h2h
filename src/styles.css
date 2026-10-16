@@ -265,6 +265,7 @@ textarea.input { resize: vertical; }
 .event-search__list button:hover { background: var(--bg); }
 .event-search__list .event-search__custom { color: var(--info); font-weight: 700; }
 .event-search__none { padding: 10px 14px; }
+.event-search__forbidden { display: grid; gap: 2px; padding: 10px 14px; opacity: .75; cursor: not-allowed; }
 .big-check { width: 60px; height: 60px; margin: 0 auto 14px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); display: grid; place-items: center; font-size: 28px; font-weight: 800; }
 
 /* Списки в кабинете и админке */
@@ -580,6 +581,10 @@ select option { background: var(--surface); color: var(--ink); }
 .score--bad { background: var(--bad-soft); color: var(--bad); }
 .signals { list-style: none; margin: 0 0 12px; padding: 10px 12px; display: grid; gap: 4px; border-radius: 10px; background: var(--bg); }
 .signals li { font-weight: 500; }
+.checklist { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 2px; margin: 0 0 14px; }
+.checklist legend { padding: 0 6px; }
+.checklist .check { margin: 6px 0 10px; font-weight: 500; }
+.kv .links { display: grid; gap: 2px; overflow-wrap: anywhere; }
 .suspicious > summary { cursor: pointer; font-weight: 700; padding: 10px 0; }
 .suspicious[open] > summary { margin-bottom: 8px; }
 

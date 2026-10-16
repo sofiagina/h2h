@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api, type AppNotification, type NotificationKind, type SellStatus } from '../api';
 import { useAuth } from '../auth/AuthContext';
-import { IconBell, IconChat, IconShield, IconSwap, IconTicket, IconWallet } from '../components/icons';
+import { IconBell, IconCalendar, IconChat, IconShield, IconSwap, IconTicket, IconWallet } from '../components/icons';
 import { NOTIFICATIONS_READ } from '../lib/notifications';
 import { DisputeBadge, Empty, ErrorBox, OrderBadge, PayoutBadge, SellBadge, Spinner } from '../components/ui';
 import { dateLong, dateTime, money, seatLabel } from '../lib/format';
@@ -113,6 +113,12 @@ function SellList() {
             </div>
           )}
           {s.rejectReason && <p className="small bad-text">Причина отказа: {s.rejectReason}</p>}
+          {s.status === 'event_review' && (
+            <p className="small muted">
+              Концерта ещё нет в каталоге. Проверяем, что он настоящий и организатор разрешает перепродажу, обычно до суток. Потом
+              билет сам уйдёт на проверку.
+            </p>
+          )}
           {CANCELLABLE.includes(s.status) && <CancelSale id={s.id} onDone={() => items.reload(true)} />}
           {s.disputeOrderId && (
             <Link to={`/disputes/${s.disputeOrderId}`} className="dispute-link dispute-link--sm">
@@ -130,7 +136,7 @@ function SellList() {
 }
 
 /** Снять можно, пока билет не купили. */
-const CANCELLABLE: SellStatus[] = ['review', 'pending', 'listed'];
+const CANCELLABLE: SellStatus[] = ['event_review', 'review', 'pending', 'listed'];
 
 function CancelSale({ id, onDone }: { id: string; onDone(): void }) {
   const [confirm, setConfirm] = useState(false);
@@ -179,6 +185,7 @@ const KIND_ICON: Record<NotificationKind, typeof IconBell> = {
   sell_rejected: IconBell,
   sell_sold: IconSwap,
   sell_cancelled: IconTicket,
+  sell_event_added: IconCalendar,
   payout_sent: IconWallet,
   dispute_opened: IconShield,
   dispute_message: IconChat,

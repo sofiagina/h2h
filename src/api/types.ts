@@ -14,7 +14,8 @@ export type EventStatus = 'scheduled' | 'postponed' | 'cancelled' | 'sold_out';
  * review — новый концерт на ручной проверке; pending — проверяем билет у организатора или модератором;
  * cancelled — продавец сам снял объявление до покупки.
  */
-export type SellStatus = 'review' | 'pending' | 'listed' | 'sold' | 'rejected' | 'cancelled';
+export type SellStatus = 'event_review' | 'review' | 'pending' | 'listed' | 'sold' | 'rejected' | 'cancelled';
+// event_review — концерта нет в каталоге: билет ждёт, пока админ проверит и добавит концерт.
 /**
  * organizer — организатор подключён: перевыпускает билет на покупателя, дублей нет.
  * escrow — организатора нет: билет передаёт продавец, выплата — через сутки после начала концерта.
@@ -56,6 +57,12 @@ export interface EventItem {
   waitlistCount: number;
   /** В избранном у текущего пользователя (для гостя всегда false). */
   isFavorite: boolean;
+  /**
+   * Организатор запрещает перепродажу (выяснил админ при проверке заявки).
+   * Такой концерт не показывается в каталоге, а в поиске продавца виден с пометкой и не выбирается.
+   */
+  resaleForbidden: boolean;
+  resaleNote: string | null;
 }
 
 export type EventRef = Pick<EventItem, 'id' | 'title' | 'startsAt' | 'venue'>;
@@ -174,6 +181,47 @@ export interface AdminDispute extends Order {
   sellerEmail: string | null;
 }
 
+/**
+ * Заявка на добавление концерта в каталог. Одна на концерт: если его просят несколько продавцов,
+ * они добавляются в sellers, а не плодят дубли.
+ */
+export type EventRequestStatus = 'pending' | 'added' | 'merged' | 'rejected';
+export type EventRejectReason = 'not_found' | 'resale_forbidden' | 'out_of_region' | 'past' | 'spam' | 'other';
+
+export interface EventRequest {
+  id: string;
+  status: EventRequestStatus;
+  /** Как описали продавцы — черновик карточки. */
+  title: string;
+  city: string;
+  venue: string;
+  startsAt: string;
+  sourceUrls: string[];
+  /** Продавцы, чьи билеты ждут этот концерт. */
+  sellers: { sellRequestId: string; sellerEmail: string; createdAt: string }[];
+  /** Проверка ссылок — те же сигналы, что у заявок на билеты. */
+  check: SellCheck;
+  createdAt: string;
+  /** Итоговый концерт в каталоге (added, merged, а при resale_forbidden — карточка с запретом). */
+  eventId: string | null;
+  rejectReason: EventRejectReason | null;
+  comment: string | null;
+  resolvedAt: string | null;
+}
+
+/** Карточка концерта, которую заполняет админ при добавлении в каталог. */
+export interface EventCardInput {
+  title: string;
+  artist: string;
+  group: EventGroup;
+  description: string;
+  city: string;
+  venue: string;
+  address: string;
+  startsAt: string;
+  ageLimit: number;
+}
+
 /** Концерт, которого нет в каталоге: продавец описывает его сам, модератор проверяет. */
 export interface NewEventInput {
   title: string;
@@ -256,6 +304,7 @@ export type NotificationKind =
   | 'sell_rejected'
   | 'sell_sold'
   | 'sell_cancelled'
+  | 'sell_event_added'
   | 'payout_sent'
   | 'dispute_opened'
   | 'dispute_message'
@@ -395,6 +444,13 @@ export interface Api {
   adminSellRequests(): Promise<AdminSellRequest[]>;
   /** spam — отказ с пометкой «мусор»: продавцу ставится страйк. */
   adminReviewSell(id: string, approve: boolean, comment: string, spam?: boolean): Promise<AdminSellRequest>;
+  adminEventRequests(): Promise<EventRequest[]>;
+  /** Проверили: концерт настоящий, наш регион, перепродажа разрешена — публикуем карточку. */
+  adminAddEvent(requestId: string, card: EventCardInput): Promise<EventRequest>;
+  /** Концерт уже есть в каталоге — привязываем билеты к нему. */
+  adminMergeEvent(requestId: string, eventId: string): Promise<EventRequest>;
+  /** resale_forbidden — дополнительно запоминаем концерт с запретом, чтобы заявки не повторялись. */
+  adminRejectEvent(requestId: string, reason: EventRejectReason, comment: string): Promise<EventRequest>;
   adminDisputes(): Promise<AdminDispute[]>;
   adminResolveDispute(orderId: string, refund: boolean, comment: string): Promise<DisputeView>;
 }

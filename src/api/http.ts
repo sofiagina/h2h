@@ -178,6 +178,10 @@ export const httpApi: Api = {
   adminSellRequests: () => req('GET', '/admin/sell-requests'),
   adminReviewSell: (id, approve, comment, spam = false) =>
     req('POST', `/admin/sell-requests/${id}/review`, { body: { approve, comment, spam } }),
+  adminEventRequests: () => req('GET', '/admin/event-requests'),
+  adminAddEvent: (id, card) => req('POST', `/admin/event-requests/${id}/add`, { body: card }),
+  adminMergeEvent: (id, eventId) => req('POST', `/admin/event-requests/${id}/merge`, { body: { eventId } }),
+  adminRejectEvent: (id, reason, comment) => req('POST', `/admin/event-requests/${id}/reject`, { body: { reason, comment } }),
   adminDisputes: () => req('GET', '/admin/disputes'),
   adminResolveDispute: (orderId, refund, comment) => req('POST', `/admin/disputes/${orderId}/resolve`, { body: { refund, comment } }),
 };

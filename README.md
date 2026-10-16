@@ -132,8 +132,12 @@ npm run dev
 | PATCH | `/admin/aggregators/{id}` | `{ mode, reason }` → `Aggregator` (пишется в журнал действий) |
 | POST | `/admin/aggregators/{id}/check` | внеочередная проверка → `Aggregator` |
 | GET | `/admin/orders` | → `Order[]` |
-| GET | `/admin/sell-requests` | → `AdminSellRequest[]` |
-| POST | `/admin/sell-requests/{id}/review` | `{ approve, comment }` → публикует концерт и билет или отклоняет с причиной |
+| GET | `/admin/sell-requests` | → `AdminSellRequest[]` с оценкой `check` и историей продавца `seller` |
+| POST | `/admin/sell-requests/{id}/review` | `{ approve, comment, spam? }` → выставляет билет или отклоняет; `spam` — страйк продавцу |
+| GET | `/admin/event-requests` | → `EventRequest[]`: заявки на концерты, которых нет в каталоге (одна на концерт, продавцы в `sellers`) |
+| POST | `/admin/event-requests/{id}/add` | `EventCardInput` → концерт в каталоге, билеты заявки `event_review` → `review` |
+| POST | `/admin/event-requests/{id}/merge` | `{ eventId }` → билеты привязываются к существующему концерту |
+| POST | `/admin/event-requests/{id}/reject` | `{ reason, comment }`; `resale_forbidden` запоминает запрет, `spam` — страйки |
 | GET | `/admin/disputes` | → `AdminDispute[]`, открытые сверху |
 | POST | `/admin/disputes/{orderId}/resolve` | `{ refund, comment }` → `DisputeView` |
 

@@ -52,6 +52,7 @@ const ORDER: Record<OrderStatus, [string, Tone]> = {
 export const OrderBadge = ({ status }: { status: OrderStatus }) => <Badge label={ORDER[status][0]} tone={ORDER[status][1]} />;
 
 const SELL: Record<SellStatus, [string, Tone]> = {
+  event_review: ['Проверяем концерт', 'warn'],
   review: ['Модератор проверяет', 'warn'],
   pending: ['Проверяем билет', 'warn'],
   listed: ['В продаже', 'info'],

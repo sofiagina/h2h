@@ -4,6 +4,7 @@ import { api, type AdminSellRequest, type Aggregator, type AggregatorMode } from
 import { useAuth } from '../auth/AuthContext';
 import { Select } from '../components/Select';
 import { NEW_EVENT_LIMITS } from '../lib/sourceCheck';
+import { EventRequests } from './AdminEvents';
 import { AggBadge, DisputeBadge, ErrorBox, OrderBadge, SellBadge, Spinner } from '../components/ui';
 import { dateLong, dateTime, money, seatLabel } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
@@ -27,6 +28,8 @@ export function Admin() {
   const tab = params.get('tab') ?? 'kassa';
   const disputes = useAsync(() => (user?.role === 'admin' ? api.adminDisputes() : Promise.resolve([])), [user?.role, tab]);
   const openDisputes = disputes.data?.filter((d) => d.dispute.status === 'open').length ?? 0;
+  const eventRequests = useAsync(() => (user?.role === 'admin' ? api.adminEventRequests() : Promise.resolve([])), [user?.role, tab]);
+  const pendingEvents = eventRequests.data?.filter((r) => r.status === 'pending').length ?? 0;
 
   if (!ready) return <div className="container section"><Spinner /></div>;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
@@ -53,8 +56,11 @@ export function Admin() {
         <button role="tab" aria-selected={tab === 'kassa'} className={tab === 'kassa' ? 'active' : ''} onClick={() => setParams({})}>
           Организаторы и API
         </button>
+        <button role="tab" aria-selected={tab === 'events'} className={tab === 'events' ? 'active' : ''} onClick={() => setParams({ tab: 'events' })}>
+          Концерты {pendingEvents > 0 && <span className="tab-count">{pendingEvents}</span>}
+        </button>
         <button role="tab" aria-selected={tab === 'review'} className={tab === 'review' ? 'active' : ''} onClick={() => setParams({ tab: 'review' })}>
-          Модерация
+          Модерация билетов
         </button>
         <button role="tab" aria-selected={tab === 'disputes'} className={tab === 'disputes' ? 'active' : ''} onClick={() => setParams({ tab: 'disputes' })}>
           Споры {openDisputes > 0 && <span className="tab-count">{openDisputes}</span>}
@@ -64,6 +70,7 @@ export function Admin() {
         </button>
       </div>
       {tab === 'kassa' && <Aggregators />}
+      {tab === 'events' && <EventRequests />}
       {tab === 'review' && <Review />}
       {tab === 'disputes' && <Disputes />}
       {tab === 'orders' && <Orders />}
@@ -219,7 +226,8 @@ function Review() {
   return (
     <>
       <p className="muted">
-        Концерты без организатора. Проверьте ссылку и билет. Сверху — заявки с лучшей оценкой.
+        Билеты на концерты без организатора: проверьте файл билета и данные заказа. Сам концерт уже проверен во вкладке
+        «Концерты». Сверху — заявки с лучшей оценкой.
       </p>
       {!pending.length && <p className="muted">Новых заявок нет.</p>}
       <div className="agg-grid">

@@ -169,11 +169,13 @@ export function Sell() {
           <m.div className="big-check" aria-hidden initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 380, damping: 16 }}>
             ✓
           </m.div>
-          <h1 className="h2">Билет отправлен на проверку</h1>
+          <h1 className="h2">{done.status === 'event_review' ? 'Заявка на концерт отправлена' : 'Билет отправлен на проверку'}</h1>
           <p className="muted">
-            {done.status === 'review'
-              ? 'Концерт без организатора, поэтому заявку проверит модератор, обычно в течение суток.'
-              : 'Проверяем билет у организатора, это пара минут.'}{' '}
+            {done.status === 'event_review'
+              ? 'Сначала проверим концерт и добавим его в каталог, обычно в течение суток. Билет ждёт и потом уйдёт на проверку сам — пришлём уведомление.'
+              : done.status === 'review'
+                ? 'Концерт без организатора, поэтому заявку проверит модератор, обычно в течение суток.'
+                : 'Проверяем билет у организатора, это пара минут.'}{' '}
             {done.guarantee === 'escrow'
               ? 'Деньги придут на следующий день после концерта.'
               : 'Деньги придут сразу после продажи.'}
@@ -221,6 +223,10 @@ export function Sell() {
             )}
             {custom && (
               <div className="fields">
+                <p className="muted small">
+                  Сами концерт не создаём: модератор проверит, что он настоящий, проходит в нашем регионе и организатор
+                  не запрещает перепродажу, и добавит его в каталог. Билет заполните сейчас — он подождёт и уйдёт на проверку сам.
+                </p>
                 <label className="field"><span>Название и артист</span><input className="input" value={form.title} onChange={set('title')} placeholder="Иван Петров. Сольный концерт" /></label>
                 <div className="field-row">
                   <label className="field"><span>Город</span><input className="input" value={form.city} onChange={set('city')} /></label>
@@ -412,15 +418,26 @@ function EventSearch({ events, onPick, onCustom }: { events: EventItem[]; onPick
       <ul className="event-search__list">
         {found.map((e) => (
           <li key={e.id}>
-            <button type="button" onClick={() => onPick(e)}>
-              <strong>{e.title}</strong>
-              <span className="muted small">{dateLong(e.startsAt)} · {e.venue.city}{!e.organizerConnected && ' · без организатора'}</span>
-            </button>
+            {e.resaleForbidden ? (
+              // Админ выяснил, что организатор запрещает перепродажу: показываем, но не даём выбрать.
+              <div className="event-search__forbidden" aria-disabled="true">
+                <strong>{e.title}</strong>
+                <span className="muted small">{dateLong(e.startsAt)} · {e.venue.city}</span>
+                <span className="small bad-text">
+                  Организатор не разрешает перепродажу{e.resaleNote ? `: ${e.resaleNote}` : ''}
+                </span>
+              </div>
+            ) : (
+              <button type="button" onClick={() => onPick(e)}>
+                <strong>{e.title}</strong>
+                <span className="muted small">{dateLong(e.startsAt)} · {e.venue.city}{!e.organizerConnected && ' · без организатора'}</span>
+              </button>
+            )}
           </li>
         ))}
         {!found.length && <li className="muted small event-search__none">Ничего не нашли по «{q}»</li>}
         <li>
-          <button type="button" className="event-search__custom" onClick={onCustom}>+ Моего концерта нет в списке</button>
+          <button type="button" className="event-search__custom" onClick={onCustom}>+ Концерта нет в списке — запросить добавление</button>
         </li>
       </ul>
     </div>

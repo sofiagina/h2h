@@ -442,6 +442,13 @@ paths:
         - не больше 2 заявок с новым концертом в статусе review одновременно и 5 за сутки → 429 TOO_MANY_PENDING;
         - (рекомендуется) аккаунт младше суток — новые концерты недоступны.
 
+        **Концерта нет в каталоге (newEvent).** Продавец концерт НЕ создаёт. Бэкенд ищет совпадение
+        (город, день начала, нормализованное название — регистр, ё/е, кавычки и знаки не важны):
+        с концертом каталога → 409 EVENT_EXISTS или RESALE_FORBIDDEN; с открытой EventRequest →
+        билет присоединяется к ней (sourceUrl добавляется в sourceUrls), иначе создаётся новая
+        EventRequest. Билет получает status=event_review, guarantee=escrow, а event — временную
+        ссылку на заявку (id заявки). Решение по заявке — /admin/event-requests.
+
         После создания бэкенд асинхронно считает SellCheck (см. AdminSellRequest.check):
         - известный билетный сервис по домену ссылки — плюс;
         - загрузить страницу по ссылке (защита от SSRF: только публичные IP после резолва,
@@ -482,7 +489,10 @@ paths:
               schema: { $ref: "#/components/schemas/ApiError" }
         "404": { $ref: "#/components/responses/Error" }
         "409":
-          description: DUPLICATE_TICKET — этот файл или штрихкод уже в другой заявке
+          description: >
+            DUPLICATE_TICKET — этот файл или штрихкод уже в другой заявке;
+            EVENT_EXISTS — newEvent совпал с концертом каталога (город, день, похожее название) — выбрать его;
+            RESALE_FORBIDDEN — у концерта запрет перепродажи (и для eventId, и для совпавшего newEvent)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
@@ -702,6 +712,101 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
 
+  /admin/event-requests:
+    get:
+      tags: [admin]
+      summary: Заявки на добавление концертов
+      description: >
+        Сначала pending по убыванию check.score, затем рассмотренные (новые сверху).
+        sellers у pending — только билеты в event_review (снятые продавцами не считаются);
+        если все продавцы сняли билеты, заявка удаляется.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/EventRequest" } }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /admin/event-requests/{id}/add:
+    post:
+      tags: [admin]
+      summary: Добавить концерт в каталог
+      description: >
+        Модератор проверил: концерт существует, проходит в нашем регионе, организатор не запрещает
+        перепродажу, дата не прошла (во фронте — обязательный чек-лист). Создаётся опубликованный
+        концерт без организатора; все билеты заявки в event_review → review, получают event этого
+        концерта и уведомление sell_event_added. Аудит: event:add.
+      parameters: [ { $ref: "#/components/parameters/SellRequestId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventCardInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventRequest" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /admin/event-requests/{id}/merge:
+    post:
+      tags: [admin]
+      summary: Концерт уже есть — привязать билеты к нему
+      description: >
+        Билеты заявки получают event указанного концерта: без организатора → review, с организатором → pending.
+        Нельзя привязать к концерту с resaleForbidden (400). Аудит: event:merge.
+      parameters: [ { $ref: "#/components/parameters/SellRequestId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventId]
+              properties:
+                eventId: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventRequest" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /admin/event-requests/{id}/reject:
+    post:
+      tags: [admin]
+      summary: Отклонить заявку на концерт
+      description: >
+        Все билеты заявки → rejected с текстом причины (+ comment). reason=resale_forbidden — дополнительно
+        создаётся опубликованный концерт с resaleForbidden=true и resaleNote=comment: следующие продавцы
+        получат RESALE_FORBIDDEN сразу. reason=spam — каждому продавцу страйк. reason=other — comment обязателен.
+        Аудит: event:reject:<reason>.
+      parameters: [ { $ref: "#/components/parameters/SellRequestId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, comment]
+              properties:
+                reason: { $ref: "#/components/schemas/EventRejectReason" }
+                comment: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventRequest" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /admin/disputes:
     get:
       tags: [admin]
@@ -831,8 +936,11 @@ components:
       description: organizer — перевыпуск билета организатором; escrow — передаёт продавец, выплата после концерта.
     SellStatus:
       type: string
-      enum: [review, pending, listed, sold, rejected, cancelled]
-      description: cancelled — продавец сам снял объявление до покупки.
+      enum: [event_review, review, pending, listed, sold, rejected, cancelled]
+      description: >
+        event_review — концерта нет в каталоге, билет ждёт решения по EventRequest;
+        после добавления концерта переходит в review (без организатора) или pending (с организатором).
+        cancelled — продавец сам снял объявление до покупки.
     DisputeStatus:
       type: string
       enum: [open, refunded, rejected]
@@ -877,7 +985,7 @@ components:
       required:
         [id, title, artist, category, group, description, startsAt, venue, status,
          ageLimit, aggregatorId, organizerConnected, salesEnabled, minFaceValue,
-         availableCount, waitlistCount, isFavorite]
+         availableCount, waitlistCount, isFavorite, resaleForbidden, resaleNote]
       properties:
         id: { type: string }
         title: { type: string }
@@ -901,6 +1009,12 @@ components:
         availableCount: { type: integer }
         waitlistCount: { type: integer }
         isFavorite: { type: boolean, description: Для гостя всегда false. }
+        resaleForbidden:
+          type: boolean
+          description: >
+            Организатор запрещает перепродажу (выяснил админ по заявке). В каталоге (scope=catalog)
+            такие концерты не отдаются; в scope=sell — отдаются, фронт показывает пометку и не даёт выбрать.
+        resaleNote: { type: [string, "null"], description: Что именно запрещает организатор. }
 
     Seat:
       type: object
@@ -1081,6 +1195,53 @@ components:
         strikes: { type: integer, description: Отказы со spam=true }
         restrictedUntil: { type: [string, "null"], format: date-time }
 
+    EventRejectReason:
+      type: string
+      enum: [not_found, resale_forbidden, out_of_region, past, spam, other]
+
+    EventRequest:
+      type: object
+      required: [id, status, title, city, venue, startsAt, sourceUrls, sellers, check, createdAt, eventId, rejectReason, comment, resolvedAt]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [pending, added, merged, rejected] }
+        title: { type: string }
+        city: { type: string }
+        venue: { type: string }
+        startsAt: { type: string, format: date-time }
+        sourceUrls: { type: array, items: { type: string } }
+        sellers:
+          type: array
+          items:
+            type: object
+            required: [sellRequestId, sellerEmail, createdAt]
+            properties:
+              sellRequestId: { type: string }
+              sellerEmail: { type: string }
+              createdAt: { type: string, format: date-time }
+        check:
+          $ref: "#/components/schemas/SellCheck"
+        createdAt: { type: string, format: date-time }
+        eventId: { type: [string, "null"], description: "Итоговый концерт (added, merged, а при resale_forbidden — карточка с запретом)" }
+        rejectReason:
+          oneOf: [ { $ref: "#/components/schemas/EventRejectReason" }, { type: "null" } ]
+        comment: { type: [string, "null"] }
+        resolvedAt: { type: [string, "null"], format: date-time }
+
+    EventCardInput:
+      type: object
+      required: [title, artist, group, description, city, venue, address, startsAt, ageLimit]
+      properties:
+        title: { type: string }
+        artist: { type: string, description: Пусто — берётся title. }
+        group: { $ref: "#/components/schemas/EventGroup" }
+        description: { type: string }
+        city: { type: string }
+        venue: { type: string }
+        address: { type: string }
+        startsAt: { type: string, format: date-time }
+        ageLimit: { type: integer, minimum: 0, maximum: 21 }
+
     AdminDispute:
       allOf:
         - $ref: "#/components/schemas/Order"
@@ -1157,7 +1318,7 @@ components:
       type: string
       enum:
         [order_paid, order_issued, order_failed, order_expired, order_refunded,
-         sell_listed, sell_rejected, sell_sold, sell_cancelled, payout_sent,
+         sell_listed, sell_rejected, sell_sold, sell_cancelled, sell_event_added, payout_sent,
          dispute_opened, dispute_message, dispute_resolved]
 
     AppNotification:

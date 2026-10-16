@@ -26,7 +26,11 @@ import {
   type CheckSignal,
   type SellCheck,
   type SellerHistory,
+  type EventCardInput,
   type EventRef,
+  type EventRejectReason,
+  type EventRequest,
+  type NewEventInput,
   type Guarantee,
   type HealthCheck,
   type Offer,
@@ -51,9 +55,14 @@ const ISSUE_AFTER_MS = 2500;
 const LIST_AFTER_MS = 3000;
 const DAY = 24 * 3600_000;
 
-type EventRow = Omit<EventItem, 'salesEnabled' | 'minFaceValue' | 'availableCount' | 'waitlistCount' | 'isFavorite' | 'group'> & {
+type EventRow = Omit<
+  EventItem,
+  'salesEnabled' | 'minFaceValue' | 'availableCount' | 'waitlistCount' | 'isFavorite' | 'group' | 'resaleForbidden' | 'resaleNote'
+> & {
   /** Концерт от продавца скрыт, пока модератор его не проверил. */
   published: boolean;
+  resaleForbidden?: boolean;
+  resaleNote?: string | null;
   /** Если не задан — выводится из жанра (старые данные и концерты от продавцов). */
   group?: EventGroup;
 };
@@ -67,6 +76,10 @@ type SellRow = Omit<AdminSellRequest, 'payout' | 'disputeOrderId' | 'disputeStat
   ticketFileType?: string;
   /** Отклонено модератором как мусор — страйк продавцу. */
   spam?: boolean;
+  /** Билет ждёт добавления концерта по этой заявке. */
+  eventRequestId?: string;
+  /** Когда концерт по заявке добавили в каталог. */
+  eventAddedAt?: string;
   /** Заказ, в котором билет продан: по нему продавец попадает в спор. */
   orderId?: string;
   /** Предложение в витрине, созданное по заявке: по нему снимаем с продажи. */
@@ -76,6 +89,9 @@ type SellRow = Omit<AdminSellRequest, 'payout' | 'disputeOrderId' | 'disputeStat
   closedAt?: string;
   payout: Pick<Payout, 'method' | 'details'>;
 };
+/** Заявка на концерт; продавцы и проверка считаются из заявок на билеты. */
+type EventRequestRow = Omit<EventRequest, 'check' | 'sellers'>;
+
 interface WaitRow {
   id: string;
   userId: string;
@@ -104,6 +120,7 @@ interface DB {
   offers: OfferRow[];
   orders: OrderRow[];
   sell: SellRow[];
+  eventRequests: EventRequestRow[];
   waitlist: WaitRow[];
   aggregators: Aggregator[];
   audit: AuditRow[];
@@ -281,21 +298,30 @@ function seed(): DB {
   offers.push(...extraOffers());
   for (const a of aggregators) a.eventsCount = events.filter((e) => e.aggregatorId === a.id).length;
 
-  const pendingEvent: EventRow = {
-    id: 'ev_user_1', title: 'Хор «Волжские голоса». Юбилейный концерт', artist: 'Хор «Волжские голоса»', category: 'Другое',
-    description: 'Концерт добавлен продавцом. Организатор не подключён к Hand2Hand.', ageLimit: 0,
-    startsAt: daysFromNow(15, 18), venue: { name: 'ДК «Металлург»', city: 'Волгоград', address: '' },
-    status: 'scheduled', aggregatorId: null, organizerConnected: false, published: false,
+  // Концерт, по которому админ выяснил: организатор запрещает перепродажу.
+  events.push({
+    id: 'ev_forbidden', title: 'Фестиваль «Волжские берега»', artist: 'Фестиваль «Волжские берега»', category: 'Фестиваль',
+    description: 'Организатор продаёт возвраты только через свою кассу.', ageLimit: 12, group: 'festivals',
+    startsAt: daysFromNow(40, 16), venue: { name: 'Набережная', city: 'Волгоград', address: '' },
+    status: 'scheduled', aggregatorId: null, organizerConnected: false, published: true,
+    resaleForbidden: true, resaleNote: 'возврат и переоформление только через кассу организатора',
+  });
+
+  // Заявки на концерты, которых нет в каталоге. Хор просят двое — одна заявка на двоих.
+  const t0 = Date.now();
+  const hor: EventRequestRow = {
+    id: 'evr_hor', status: 'pending', title: 'Хор «Волжские голоса». Юбилейный концерт', city: 'Волгоград', venue: 'ДК «Металлург»',
+    startsAt: daysFromNow(15, 18), sourceUrls: ['https://www.kassir.ru/volgograd/hor-volzhskie-golosa-yubiley'],
+    createdAt: iso(new Date(t0 - 3 * 3600_000)), eventId: null, rejectReason: null, comment: null, resolvedAt: null,
   };
-  events.push(pendingEvent);
-  // Пример мусора для модерации: ссылка на видео, фото вместо билета, выдуманный номер.
-  const junkEvent: EventRow = {
-    id: 'ev_user_2', title: 'Концерт года', artist: 'Концерт года', category: 'Другое',
-    description: 'Концерт добавлен продавцом. Организатор не подключён к Hand2Hand.', ageLimit: 0,
-    startsAt: daysFromNow(9, 20), venue: { name: 'Стадион', city: 'Волгоград', address: '' },
-    status: 'scheduled', aggregatorId: null, organizerConnected: false, published: false,
+  // Пример мусора: ссылка на видео, фото вместо билета, выдуманный номер.
+  const junk: EventRequestRow = {
+    id: 'evr_junk', status: 'pending', title: 'Концерт года', city: 'Волгоград', venue: 'Стадион',
+    startsAt: daysFromNow(9, 20), sourceUrls: ['https://www.youtube.com/watch?v=dQw4w9WgXcQ'],
+    createdAt: iso(new Date(t0 - 1800_000)), eventId: null, rejectReason: null, comment: null, resolvedAt: null,
   };
-  events.push(junkEvent);
+  const waitRef = (r: EventRequestRow): EventRef => ({ id: r.id, title: r.title, startsAt: r.startsAt, venue: { name: r.venue, city: r.city, address: '' } });
+  const kvartirnik = events.find((e) => e.id === 'ev_kvartirnik');
 
   return {
     favorites: [],
@@ -304,21 +330,39 @@ function seed(): DB {
     events,
     offers,
     orders: [],
+    eventRequests: [hor, junk],
     sell: [
       {
-        id: id('sr'), userId: 'seed', sellerEmail: 'seller@example.test', event: ref(pendingEvent), seat: { sector: 'Партер', row: '6', place: '10' },
-        faceValue: 120000, orderNumber: 'DK-48211', status: 'review', guarantee: 'escrow', createdAt: iso(new Date(Date.now() - 3600_000)),
-        purchaseEmail: 'seller@example.test', boughtAt: 'Касса ДК', sourceUrl: 'https://example.test/afisha/hor-yubiley', ticketFileName: 'bilet.pdf',
+        id: id('sr'), userId: 'seed', sellerEmail: 'seller@example.test', event: waitRef(hor), seat: { sector: 'Партер', row: '6', place: '10' },
+        faceValue: 120000, orderNumber: 'DK-48211', status: 'event_review', guarantee: 'escrow', createdAt: hor.createdAt,
+        purchaseEmail: 'seller@example.test', boughtAt: 'Кассир.ру', sourceUrl: hor.sourceUrls[0], ticketFileName: 'bilet.pdf',
         eventIsNew: true, payout: { method: 'sbp', details: '+7 ••• •••-45-12, Сбербанк' },
-        ticketFileType: 'application/pdf',
+        ticketFileType: 'application/pdf', eventRequestId: hor.id,
       },
       {
-        id: id('sr'), userId: 'seed_junk', sellerEmail: 'krutoi2011@example.test', event: ref(junkEvent), seat: { sector: 'VIP' },
-        faceValue: 99900, orderNumber: '1111', status: 'review', guarantee: 'escrow', createdAt: iso(new Date(Date.now() - 1800_000)),
-        purchaseEmail: 'krutoi2011@example.test', boughtAt: 'в интернете', sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-        ticketFileName: 'bilet.jpg', ticketFileType: 'image/jpeg', eventIsNew: true,
-        payout: { method: 'card', details: 'карта •••• 0000' },
+        id: id('sr'), userId: 'seed_2', sellerEmail: 'olga@example.test', event: waitRef(hor), seat: { sector: 'Балкон', row: '2', place: '4' },
+        faceValue: 90000, orderNumber: 'KS-551902', status: 'event_review', guarantee: 'escrow', createdAt: iso(new Date(t0 - 3600_000)),
+        purchaseEmail: 'olga@example.test', boughtAt: 'Кассир.ру', sourceUrl: hor.sourceUrls[0], ticketFileName: 'hor.pdf',
+        eventIsNew: true, payout: { method: 'card', details: 'карта •••• 4417' },
+        ticketFileType: 'application/pdf', eventRequestId: hor.id,
       },
+      {
+        id: id('sr'), userId: 'seed_junk', sellerEmail: 'krutoi2011@example.test', event: waitRef(junk), seat: { sector: 'VIP' },
+        faceValue: 99900, orderNumber: '1111', status: 'event_review', guarantee: 'escrow', createdAt: junk.createdAt,
+        purchaseEmail: 'krutoi2011@example.test', boughtAt: 'в интернете', sourceUrl: junk.sourceUrls[0],
+        ticketFileName: 'bilet.jpg', ticketFileType: 'image/jpeg', eventIsNew: true,
+        payout: { method: 'card', details: 'карта •••• 0000' }, eventRequestId: junk.id,
+      },
+      // Билет на концерт из каталога без организатора — в очереди «Модерация билетов».
+      ...(kvartirnik
+        ? [{
+            id: id('sr'), userId: 'seed', sellerEmail: 'seller@example.test', event: ref(kvartirnik), seat: { sector: 'Входной' },
+            faceValue: 150000, orderNumber: 'TL-7730418', status: 'review' as const, guarantee: 'escrow' as const,
+            createdAt: iso(new Date(t0 - 2 * 3600_000)), purchaseEmail: 'seller@example.test', boughtAt: 'Ticketland',
+            sourceUrl: null, ticketFileName: 'kvartirnik.pdf', ticketFileType: 'application/pdf', eventIsNew: false,
+            payout: { method: 'sbp' as const, details: '+7 ••• •••-45-12, Сбербанк' },
+          }]
+        : []),
     ],
     waitlist: [
       { id: id('wl'), userId: 'seed', eventId: 'ev_jazz', createdAt: now() },
@@ -352,6 +396,7 @@ function load(): DB {
 function normalize(data: DB): DB {
   data.favorites ??= [];
   data.notificationsSeen ??= {};
+  data.eventRequests ??= [];
   const known = new Set(data.events.map((e) => e.id));
   const missing = extraEvents().filter((e) => !known.has(e.id));
   if (missing.length) {
@@ -448,6 +493,8 @@ function decorate(e: EventRow, user: User | null = optionalUser()): EventItem {
     waitlistCount: db.waitlist.filter((w) => w.eventId === e.id).length,
     group: groupOf(e),
     isFavorite: !!user && db.favorites.some((f) => f.userId === user.id && f.eventId === e.id),
+    resaleForbidden: e.resaleForbidden ?? false,
+    resaleNote: e.resaleNote ?? null,
   };
 }
 
@@ -547,6 +594,96 @@ function toAdminSell(s: SellRow): AdminSellRequest {
     sourceUrl: s.sourceUrl, ticketFileName: s.ticketFileName, eventIsNew: s.eventIsNew,
     check: checkOf(s, seller), seller,
   };
+}
+
+const normText = (v: string) => v.toLowerCase().replace(/ё/g, 'е').replace(/[«»"'.,!?:;()\-–—]/g, ' ').replace(/\s+/g, ' ').trim();
+const similarTitle = (a: string, b: string) => {
+  const x = normText(a);
+  const y = normText(b);
+  return x === y || (Math.min(x.length, y.length) >= 5 && (x.includes(y) || y.includes(x)));
+};
+/** Один и тот же концерт: город, день и похожее название. */
+const sameEvent = (a: { title: string; city: string; startsAt: string }, b: { title: string; city: string; startsAt: string }) =>
+  normText(a.city) === normText(b.city) && a.startsAt.slice(0, 10) === b.startsAt.slice(0, 10) && similarTitle(a.title, b.title);
+
+const matchEvent = (n: NewEventInput) =>
+  db.events.find((e) => e.published && sameEvent({ title: e.title, city: e.venue.city, startsAt: e.startsAt }, n));
+const matchRequest = (n: NewEventInput) => db.eventRequests.find((r) => r.status === 'pending' && sameEvent(r, n));
+
+/** Пока концерта нет в каталоге, билет ссылается на заявку. */
+const waitingRef = (r: EventRequestRow): EventRef => ({ id: r.id, title: r.title, startsAt: r.startsAt, venue: { name: r.venue, city: r.city, address: '' } });
+
+const waitingTickets = (r: EventRequestRow) => db.sell.filter((x) => x.eventRequestId === r.id && x.status === 'event_review');
+
+function dropEmptyRequest(requestId: string) {
+  const r = db.eventRequests.find((x) => x.id === requestId);
+  if (r?.status === 'pending' && !waitingTickets(r).length) db.eventRequests = db.eventRequests.filter((x) => x !== r);
+}
+
+const GROUP_TITLE: Record<EventGroup, string> = {
+  concerts: 'Концерт', festivals: 'Фестиваль', theatre: 'Театр', standup: 'Стендап',
+  classic: 'Классика', kids: 'Детям', sport: 'Спорт', club: 'Клуб',
+};
+
+const REJECT_TEXT: Record<EventRejectReason, string> = {
+  not_found: 'Не нашли такой концерт у организатора или в билетных сервисах',
+  resale_forbidden: 'Организатор не разрешает перепродажу билетов',
+  out_of_region: 'Мы пока не работаем в этом городе',
+  past: 'Концерт уже прошёл или отменён',
+  spam: 'Заявка недостоверная: ссылка и данные не подтверждают концерт',
+  other: 'Концерт не добавлен',
+};
+
+/** Проверка заявки на концерт: ссылки, сколько продавцов просят, история продавцов. */
+function eventCheckOf(r: EventRequestRow, rows: SellRow[]): SellCheck {
+  const signals: CheckSignal[] = [];
+  let score = 30;
+  const add = (ok: boolean, text: string, points: number) => {
+    signals.push({ ok, text });
+    score += points;
+  };
+  const verdicts = r.sourceUrls.map(checkSourceUrl);
+  const best = verdicts.find((v) => v.ok && v.known) ?? verdicts.find((v) => v.ok);
+  if (best?.ok && best.known) add(true, `Ссылка на билетный сервис: ${best.known}`, 30);
+  else if (best?.ok) add(true, `Ссылка на сайт ${best.host} — сверьте название, дату и площадку`, 10);
+  for (const v of verdicts) if (!v.ok) add(false, `Ссылка: ${v.reason.charAt(0).toLowerCase()}${v.reason.slice(1)}`, -40);
+  const sellers = new Set(rows.map((x) => x.userId)).size;
+  if (sellers > 1) add(true, `Концерт просят ${sellers} продавца — скорее всего настоящий`, 10 * Math.min(3, sellers - 1));
+  if ((Date.parse(r.startsAt) - Date.now()) / DAY > 365) add(false, 'Концерт больше чем через год', -10);
+  const strikes = rows.reduce((n, x) => n + sellerHistory(x.userId).strikes, 0);
+  if (strikes > 0) add(false, `У продавцов страйков: ${strikes}`, -20 * strikes);
+  if (rows.some((x) => orderNumberProblem(x.orderNumber))) add(false, 'В билетах выдуманные номера заказов', -15);
+  score = Math.max(0, Math.min(100, score));
+  return { score, suspicious: score < NEW_EVENT_LIMITS.suspiciousBelow, signals };
+}
+
+function toEventRequest(r: EventRequestRow): EventRequest {
+  const rows = db.sell.filter((x) => x.eventRequestId === r.id && (r.status !== 'pending' || x.status === 'event_review'));
+  return {
+    ...r,
+    sellers: rows.map((x) => ({ sellRequestId: x.id, sellerEmail: x.sellerEmail, createdAt: x.createdAt })),
+    check: eventCheckOf(r, rows),
+  };
+}
+
+/** Концерт появился в каталоге — ждавшие билеты уходят на свою проверку. */
+function releaseTickets(r: EventRequestRow, ev: EventRow) {
+  const at = now();
+  for (const x of waitingTickets(r)) {
+    x.event = ref(ev);
+    x.eventAddedAt = at;
+    x.guarantee = ev.organizerConnected ? 'organizer' : 'escrow';
+    x.status = ev.organizerConnected ? 'pending' : 'review';
+    // Для pending отсчёт проверки у организатора — с момента добавления концерта.
+    if (ev.organizerConnected) x.createdAt = at;
+  }
+}
+
+function pendingRequest(requestId: string) {
+  const r = db.eventRequests.find((x) => x.id === requestId);
+  if (!r) throw new ApiError('NOT_FOUND', 'Заявка на концерт не найдена', 404);
+  if (r.status !== 'pending') throw new ApiError('INVALID', 'Заявка уже рассмотрена');
+  return r;
 }
 
 async function sha256(file: File) {
@@ -680,6 +817,7 @@ function notificationsOf(user: User): Draft[] {
     const t = `${s.event.title}, ${seatText(s.seat)}`;
     const order = s.orderId ? db.orders.find((o) => o.id === s.orderId) : undefined;
     const sell = { type: 'sell' as const, id: s.id };
+    push(s.eventAddedAt && { kind: 'sell_event_added', title: 'Концерт добавлен в каталог', text: `${t}: проверяем билет`, at: s.eventAddedAt, target: sell });
     push(s.listedAt && { kind: 'sell_listed', title: 'Билет в продаже', text: t, at: s.listedAt, target: sell });
     push(s.status === 'rejected' && { kind: 'sell_rejected', title: 'Заявка отклонена', text: s.rejectReason ?? t, at: s.closedAt ?? s.createdAt, target: sell });
     push(s.status === 'cancelled' && { kind: 'sell_cancelled', title: 'Вы сняли билет с продажи', text: t, at: s.closedAt ?? s.createdAt, target: sell });
@@ -760,7 +898,8 @@ export const mockApi: Api = {
       .filter((e) => Date.parse(e.startsAt) > Date.now())
       .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
       .map((e) => decorate(e, user))
-      .filter((e) => filter.scope === 'sell' || e.organizerConnected || e.availableCount > 0);
+      // Концерты с запретом перепродажи видит только продавец в поиске — с пометкой.
+      .filter((e) => filter.scope === 'sell' || (!e.resaleForbidden && (e.organizerConnected || e.availableCount > 0)));
   },
 
   async listCities() {
@@ -900,8 +1039,12 @@ export const mockApi: Api = {
     if (!(input.faceValue >= 10000)) throw new ApiError('INVALID', 'Номинал от 100 ₽');
     const payoutDetails = describePayout(input.payout);
 
-    let event: EventRow | undefined;
-    let eventIsNew = false;
+    // Тот же файл билета в другой живой заявке — копия, а не второй билет.
+    const fileHash = input.ticketFile ? await sha256(input.ticketFile) : undefined;
+    if (fileHash && db.sell.some((x) => x.ticketFileHash === fileHash && x.status !== 'cancelled' && !(x.userId === user.id && x.status === 'rejected')))
+      throw new ApiError('DUPLICATE_TICKET', 'Этот файл билета уже загружали в другой заявке. Приложите свой билет.', 409);
+
+    let target: { ref: EventRef; guarantee: Guarantee; status: SellRow['status']; requestId?: string };
     if (input.newEvent) {
       const n = input.newEvent;
       if (!n.title.trim() || !n.city.trim() || !n.venue.trim() || !n.startsAt) throw new ApiError('INVALID', 'Заполните название, город, площадку и дату');
@@ -921,39 +1064,48 @@ export const mockApi: Api = {
           403,
         );
       const mine = db.sell.filter((x) => x.userId === user.id && x.eventIsNew);
-      if (mine.filter((x) => x.status === 'review').length >= NEW_EVENT_LIMITS.inReview)
+      if (mine.filter((x) => x.status === 'event_review' || x.status === 'review').length >= NEW_EVENT_LIMITS.inReview)
         throw new ApiError('TOO_MANY_PENDING', `На проверке уже ${NEW_EVENT_LIMITS.inReview} заявки с новыми концертами. Дождитесь решения модератора.`, 429);
       if (mine.filter((x) => Date.now() - Date.parse(x.createdAt) < DAY).length >= NEW_EVENT_LIMITS.perDay)
         throw new ApiError('TOO_MANY_PENDING', 'Сегодня вы уже добавили много новых концертов. Попробуйте завтра.', 429);
-      event = {
-        id: id('ev'), title: n.title.trim(), artist: n.title.trim(), category: 'Другое', ageLimit: 0, status: 'scheduled',
-        description: 'Концерт добавлен продавцом. Организатор не подключён к Hand2Hand.',
-        startsAt: n.startsAt, venue: { name: n.venue.trim(), city: n.city.trim(), address: '' },
-        aggregatorId: null, organizerConnected: false, published: false,
-      };
-      db.events.push(event);
-      eventIsNew = true;
-    } else {
-      event = input.eventId ? eventById(input.eventId) : undefined;
-      if (!event || !event.published) throw new ApiError('NOT_FOUND', 'Выберите концерт из списка или добавьте свой');
-      if (!event.organizerConnected && !input.ticketFile) throw new ApiError('INVALID', 'Приложите файл билета');
-    }
 
-    // Тот же файл билета в другой живой заявке — копия, а не второй билет.
-    const fileHash = input.ticketFile ? await sha256(input.ticketFile) : undefined;
-    if (fileHash && db.sell.some((x) => x.ticketFileHash === fileHash && x.status !== 'cancelled' && !(x.userId === user.id && x.status === 'rejected'))) {
-      if (eventIsNew) db.events = db.events.filter((e) => e !== event);
-      throw new ApiError('DUPLICATE_TICKET', 'Этот файл билета уже загружали в другой заявке. Приложите свой билет.', 409);
+      // Концерт уже знаем: в каталоге — пусть выберет его; с запретом — сразу отказ.
+      const known = matchEvent(n);
+      if (known?.resaleForbidden)
+        throw new ApiError('RESALE_FORBIDDEN', `Организатор концерта «${known.title}» не разрешает перепродажу${known.resaleNote ? `: ${known.resaleNote}` : ''}.`, 409);
+      if (known)
+        throw new ApiError('EVENT_EXISTS', `Этот концерт уже есть в каталоге: «${known.title}». Вернитесь на шаг назад и выберите его в поиске.`, 409);
+
+      // Одна заявка на концерт: второй продавец присоединяется к первой.
+      let request = matchRequest(n);
+      if (!request) {
+        request = {
+          id: id('evr'), status: 'pending', title: n.title.trim(), city: n.city.trim(), venue: n.venue.trim(), startsAt: n.startsAt,
+          sourceUrls: [], createdAt: now(), eventId: null, rejectReason: null, comment: null, resolvedAt: null,
+        };
+        db.eventRequests.unshift(request);
+      }
+      const url = n.sourceUrl.trim();
+      if (!request.sourceUrls.includes(url)) request.sourceUrls.push(url);
+      target = { ref: waitingRef(request), guarantee: 'escrow', status: 'event_review', requestId: request.id };
+    } else {
+      const event = input.eventId ? eventById(input.eventId) : undefined;
+      if (!event || !event.published) throw new ApiError('NOT_FOUND', 'Выберите концерт из списка или добавьте свой');
+      if (event.resaleForbidden)
+        throw new ApiError('RESALE_FORBIDDEN', `Организатор этого концерта не разрешает перепродажу${event.resaleNote ? `: ${event.resaleNote}` : ''}.`, 409);
+      if (!event.organizerConnected && !input.ticketFile) throw new ApiError('INVALID', 'Приложите файл билета');
+      // С организатором билет проверяет его система по API, без него — модератор.
+      target = event.organizerConnected
+        ? { ref: ref(event), guarantee: 'organizer', status: 'pending' }
+        : { ref: ref(event), guarantee: 'escrow', status: 'review' };
     }
 
     const row: SellRow = {
-      id: id('sr'), userId: user.id, sellerEmail: user.email, event: ref(event), seat: input.seat, faceValue: input.faceValue,
+      id: id('sr'), userId: user.id, sellerEmail: user.email, event: target.ref, seat: input.seat, faceValue: input.faceValue,
       orderNumber: input.orderNumber.trim(), purchaseEmail: input.purchaseEmail.trim(), boughtAt: input.boughtAt.trim(),
-      sourceUrl: input.newEvent?.sourceUrl.trim() ?? null, ticketFileName: input.ticketFile?.name ?? null, eventIsNew,
+      sourceUrl: input.newEvent?.sourceUrl.trim() ?? null, ticketFileName: input.ticketFile?.name ?? null, eventIsNew: !!input.newEvent,
       ticketFileHash: fileHash, ticketFileType: input.ticketFile?.type,
-      guarantee: event.organizerConnected ? 'organizer' : 'escrow',
-      // С организатором билет проверяет его система по API, без него — модератор.
-      status: event.organizerConnected ? 'pending' : 'review',
+      guarantee: target.guarantee, status: target.status, eventRequestId: target.requestId,
       payout: { method: input.payout.method, details: payoutDetails },
       createdAt: now(),
     };
@@ -985,6 +1137,7 @@ export const mockApi: Api = {
     }
     s.status = 'cancelled';
     s.closedAt = now();
+    if (s.eventRequestId) dropEmptyRequest(s.eventRequestId);
     db.audit.push({ at: s.closedAt, userId: user.id, action: 'sell:cancel', target: sellId, reason: '' });
     save();
     return toSellRequest(s);
@@ -1121,6 +1274,84 @@ export const mockApi: Api = {
     db.audit.push({ at: now(), userId: admin.id, action: approve ? 'sell:approve' : spam ? 'sell:spam' : 'sell:reject', target: sellId, reason: comment });
     save();
     return toAdminSell(s);
+  },
+
+  async adminEventRequests() {
+    await delay();
+    requireAdmin();
+    settle();
+    const list = db.eventRequests.map(toEventRequest);
+    const pending = list.filter((r) => r.status === 'pending').sort((a, b) => b.check.score - a.check.score);
+    const done = list.filter((r) => r.status !== 'pending').sort((a, b) => (b.resolvedAt ?? '').localeCompare(a.resolvedAt ?? ''));
+    return [...pending, ...done];
+  },
+
+  async adminAddEvent(requestId, card: EventCardInput) {
+    await delay(400);
+    const admin = requireAdmin();
+    const r = pendingRequest(requestId);
+    const hasLetters = (v: string) => /\p{L}{2,}/u.test(v);
+    if (!hasLetters(card.title) || !hasLetters(card.city) || !hasLetters(card.venue)) throw new ApiError('INVALID', 'Заполните название, город и площадку');
+    if (!card.startsAt || Date.parse(card.startsAt) < Date.now()) throw new ApiError('INVALID', 'Проверьте дату: концерт не может быть в прошлом');
+    if (!(card.group in GROUP_TITLE)) throw new ApiError('INVALID', 'Выберите раздел каталога');
+    const ev: EventRow = {
+      id: id('ev'), title: card.title.trim(), artist: card.artist.trim() || card.title.trim(), category: GROUP_TITLE[card.group], group: card.group,
+      description: card.description.trim() || 'Организатор не подключён к Hand2Hand: билет передаёт продавец, деньги — после концерта.',
+      ageLimit: Math.max(0, Math.min(21, Math.round(card.ageLimit) || 0)), status: 'scheduled', startsAt: card.startsAt,
+      venue: { name: card.venue.trim(), city: card.city.trim(), address: card.address.trim() },
+      aggregatorId: null, organizerConnected: false, published: true,
+    };
+    db.events.push(ev);
+    releaseTickets(r, ev);
+    Object.assign(r, { status: 'added', eventId: ev.id, resolvedAt: now() });
+    db.audit.push({ at: r.resolvedAt!, userId: admin.id, action: 'event:add', target: requestId, reason: ev.title });
+    save();
+    return toEventRequest(r);
+  },
+
+  async adminMergeEvent(requestId, eventId) {
+    await delay(400);
+    const admin = requireAdmin();
+    const r = pendingRequest(requestId);
+    const ev = eventById(eventId);
+    if (!ev || !ev.published) throw new ApiError('NOT_FOUND', 'Концерт не найден в каталоге', 404);
+    if (ev.resaleForbidden) throw new ApiError('INVALID', 'У этого концерта запрещена перепродажа — отклоните заявку с этой причиной');
+    releaseTickets(r, ev);
+    Object.assign(r, { status: 'merged', eventId: ev.id, resolvedAt: now() });
+    db.audit.push({ at: r.resolvedAt!, userId: admin.id, action: 'event:merge', target: requestId, reason: ev.id });
+    save();
+    return toEventRequest(r);
+  },
+
+  async adminRejectEvent(requestId, reason, comment) {
+    await delay(400);
+    const admin = requireAdmin();
+    const r = pendingRequest(requestId);
+    if (!(reason in REJECT_TEXT)) throw new ApiError('INVALID', 'Выберите причину');
+    if (reason === 'other' && !comment.trim()) throw new ApiError('INVALID', 'Напишите продавцам причину');
+    const at = now();
+    // Запрет запоминаем карточкой: следующие продавцы получат отказ сразу, без модератора.
+    if (reason === 'resale_forbidden') {
+      const ev: EventRow = {
+        id: id('ev'), title: r.title, artist: r.title, category: 'Другое', ageLimit: 0, status: 'scheduled',
+        description: 'Организатор не разрешает перепродажу билетов.', startsAt: r.startsAt,
+        venue: { name: r.venue, city: r.city, address: '' }, aggregatorId: null, organizerConnected: false, published: true,
+        resaleForbidden: true, resaleNote: comment.trim() || null,
+      };
+      db.events.push(ev);
+      r.eventId = ev.id;
+    }
+    const text = comment.trim() ? `${REJECT_TEXT[reason]}: ${comment.trim()}` : REJECT_TEXT[reason];
+    for (const x of waitingTickets(r)) {
+      x.status = 'rejected';
+      x.rejectReason = text;
+      x.closedAt = at;
+      if (reason === 'spam') x.spam = true;
+    }
+    Object.assign(r, { status: 'rejected', rejectReason: reason, comment: comment.trim() || null, resolvedAt: at });
+    db.audit.push({ at, userId: admin.id, action: `event:reject:${reason}`, target: requestId, reason: comment });
+    save();
+    return toEventRequest(r);
   },
 
   async adminDisputes() {
