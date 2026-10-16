@@ -5,7 +5,7 @@ import { api, type EventItem } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { categoryOf } from '../lib/categories';
 import { cover } from '../lib/format';
-import { IconCalendar, IconChevronLeft, IconChevronRight, IconStar, IconStarFilled, IconTicket } from './icons';
+import { IconCalendar, IconChevronLeft, IconChevronRight, IconShield, IconStar, IconStarFilled, IconTicket, IconUser } from './icons';
 
 const when = (iso: string) =>
   new Intl.DateTimeFormat('ru-RU', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -68,6 +68,18 @@ function Meta({ event }: { event: EventItem }) {
         <IconTicket size={15} />
         {event.availableCount}
       </span>
+      {/* В каруселях заголовка раздела нет, поэтому способ передачи билета помечаем у самой карточки. */}
+      {event.organizerConnected ? (
+        <span className="meta__mark meta__mark--ok" title="Организатор переоформит билет на вас">
+          <IconShield size={15} />
+          проверено
+        </span>
+      ) : (
+        <span className="meta__mark" title="Концерт проверил модератор, билет передаёт продавец">
+          <IconUser size={15} />
+          от продавца
+        </span>
+      )}
     </div>
   );
 }

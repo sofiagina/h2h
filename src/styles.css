@@ -493,6 +493,15 @@ a.item:hover { border-color: var(--line-strong); }
 .meta span { display: inline-flex; align-items: center; gap: 5px; }
 .meta__date { color: var(--date); }
 .meta__count { color: var(--info); }
+.meta__mark { color: var(--ink-2); font-weight: 600; }
+.meta__mark--ok { color: var(--ok); }
+
+/* Каталог: сортировка и разделы «От организаторов» / «От продавцов» */
+.sort-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.group + .group { margin-top: 28px; }
+.group__head { margin-bottom: 12px; }
+.group__head h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; }
+.group__head p { margin: 0; max-width: 70ch; }
 
 .lines { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .line { display: grid; grid-template-columns: 64px 1fr auto; gap: 14px; align-items: center; padding: 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); text-decoration: none; }

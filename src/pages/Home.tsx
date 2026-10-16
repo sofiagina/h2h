@@ -4,7 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, type EventGroup, type EventItem } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { Carousel, EventLine, EventTile } from '../components/Discovery';
-import { IconArrowRight, IconClose, IconPin, IconSearch, IconSparkle } from '../components/icons';
+import { IconArrowRight, IconClose, IconPin, IconSearch, IconShield, IconSparkle, IconUser } from '../components/icons';
 import { Select } from '../components/Select';
 import { Empty, ErrorBox, Spinner } from '../components/ui';
 import { CATEGORIES, categoryOf } from '../lib/categories';
@@ -123,6 +123,8 @@ function Discover({ city, cities, onGroup, onCity }: { city: string; cities: str
   const popular = useMemo(() => [...all].sort((a, b) => b.availableCount + b.waitlistCount - (a.availableCount + a.waitlistCount)).slice(0, 8), [all]);
   const concerts = useMemo(() => all.filter((e) => e.group === 'concerts').slice(0, 6), [all]);
   const forYou = useMemo(() => all.filter((e) => likes.includes(e.group)), [all, likes]);
+  // Концерты без организатора в каруселях теряются — показываем их отдельным блоком внизу.
+  const fromSellers = useMemo(() => all.filter((e) => !e.organizerConnected).slice(0, 6), [all]);
 
   if (events.error) return <ErrorBox error={events.error} onRetry={() => events.reload()} />;
   if (!events.data) return <Spinner />;
@@ -223,6 +225,20 @@ function Discover({ city, cities, onGroup, onCity }: { city: string; cities: str
         </Carousel>
       )}
 
+      {fromSellers.length > 0 && (
+        <section className="block">
+          <div className="block__head">
+            <h2>От продавцов</h2>
+            <span className="muted small">Организатор не подключён — концерт и билет проверил наш модератор</span>
+          </div>
+          <m.div className="lines" variants={list} initial="hidden" animate="show">
+            {fromSellers.map((e) => (
+              <m.div key={e.id} variants={item}><EventLine event={e} /></m.div>
+            ))}
+          </m.div>
+        </section>
+      )}
+
       <section className="block how-strip">
         <div>
           <b>Не можете пойти?</b>
@@ -249,7 +265,7 @@ function Results({ query, city, group, onReset }: { query: string; city: string;
       {events.error && <ErrorBox error={events.error} onRetry={() => events.reload()} />}
       {!events.data && !events.error && <Spinner />}
       {events.data?.length === 0 && <Empty title="Ничего не нашли"><p className="muted">Попробуйте другой запрос.</p></Empty>}
-      {!!events.data?.length && <EventGrid events={events.data} />}
+      {!!events.data?.length && <EventSections events={events.data} />}
     </section>
   );
 }
@@ -271,7 +287,7 @@ function Favorites() {
         <p className="muted">Отмечайте концерты звёздочкой, и они появятся здесь.</p>
       </Empty>
     );
-  return <EventGrid events={favs.data} />;
+  return <EventSections events={favs.data} />;
 }
 
 function EventGrid({ events }: { events: EventItem[] }) {
@@ -281,5 +297,70 @@ function EventGrid({ events }: { events: EventItem[] }) {
         <m.div key={e.id} variants={item}><EventLine event={e} /></m.div>
       ))}
     </m.div>
+  );
+}
+
+type Sort = 'soon' | 'cheap' | 'many';
+
+const SORTS: { value: Sort; label: string }[] = [
+  { value: 'soon', label: 'Сначала ближайшие' },
+  { value: 'cheap', label: 'Сначала дешёвые' },
+  { value: 'many', label: 'Больше билетов' },
+];
+
+/** Пустая цена (билетов нет) всегда в конце, иначе такие концерты заняли бы верх списка. */
+const byPrice = (a: EventItem, b: EventItem) => (a.minFaceValue ?? Infinity) - (b.minFaceValue ?? Infinity);
+
+function sortEvents(events: EventItem[], sort: Sort) {
+  const sorted = [...events];
+  if (sort === 'cheap') return sorted.sort((a, b) => byPrice(a, b) || a.startsAt.localeCompare(b.startsAt));
+  if (sort === 'many') return sorted.sort((a, b) => b.availableCount - a.availableCount || a.startsAt.localeCompare(b.startsAt));
+  return sorted.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+}
+
+/**
+ * Список концертов с сортировкой и разделением по способу передачи билета:
+ * сверху — организаторы, подключённые к нам (билет перевыпускают), ниже — концерты,
+ * которые проверил наш модератор, там билет передаёт продавец.
+ */
+export function EventSections({ events }: { events: EventItem[] }) {
+  const [sort, setSort] = useState<Sort>('soon');
+  const byOrganizer = useMemo(() => sortEvents(events.filter((e) => e.organizerConnected), sort), [events, sort]);
+  const bySellers = useMemo(() => sortEvents(events.filter((e) => !e.organizerConnected), sort), [events, sort]);
+
+  return (
+    <>
+      <div className="sort-row">
+        <span className="muted small">Концертов: {events.length}</span>
+        <Select variant="inline" label="Сортировка" value={sort} onChange={(v) => setSort(v as Sort)} options={SORTS} />
+      </div>
+
+      {byOrganizer.length > 0 && (
+        <section className="group">
+          <div className="group__head">
+            <h3>
+              <IconShield size={18} /> От организаторов
+            </h3>
+            <p className="muted small">Организатор аннулирует билет продавца и выпустит новый на вас — дублей не бывает.</p>
+          </div>
+          <EventGrid events={byOrganizer} />
+        </section>
+      )}
+
+      {bySellers.length > 0 && (
+        <section className="group">
+          <div className="group__head">
+            <h3>
+              <IconUser size={18} /> От продавцов
+            </h3>
+            <p className="muted small">
+              Организатор к нам не подключён, поэтому концерт и билет проверяет наш модератор. Билет передаёт продавец, деньги
+              ему уходят только через сутки после начала — если что-то не так, вернём деньги вам.
+            </p>
+          </div>
+          <EventGrid events={bySellers} />
+        </section>
+      )}
+    </>
   );
 }
