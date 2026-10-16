@@ -1,0 +1,76 @@
+/* Оформление */
+.checkout { display: grid; grid-template-columns: 1fr 340px; gap: 20px; align-items: start; }
+.checkout__timer { display: flex; justify-content: space-between; align-items: center; background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 10px 14px; margin-bottom: 18px; font-weight: 600; }
+.countdown { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 20px; }
+.countdown--hot { color: var(--bad); }
+.row { display: flex; justify-content: space-between; gap: 12px; margin: 6px 0; }
+.row.total { font-weight: 800; font-size: 18px; margin: 16px 0; }
+.auth { max-width: 440px; }
+
+/* Заказ */
+.order-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.timeline { list-style: none; padding: 0; margin: 20px 0; display: grid; gap: 12px; }
+.timeline li { display: flex; align-items: center; gap: 12px; color: var(--ink-2); font-weight: 600; }
+.timeline li.done { color: var(--ink); }
+.timeline__dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); flex: none; }
+.timeline li.done .timeline__dot { background: var(--ok); border-color: var(--ok); }
+.timeline li.next .timeline__dot { border-color: var(--info); animation: blink 1.2s infinite; }
+@keyframes blink { 50% { box-shadow: 0 0 0 6px rgb(47 73 209 / 15%); } }
+.ticket { display: grid; grid-template-columns: 1fr 170px; margin: 20px 0; border-radius: var(--radius); overflow: hidden; background: var(--dark-card); color: #fff; }
+.ticket__main { padding: 22px; border-right: 2px dashed rgb(255 255 255 / 25%); }
+.ticket__main h3 { margin-bottom: 4px; }
+.ticket__main p { margin: 0 0 4px; opacity: .85; }
+.ticket__code { display: grid; place-items: center; padding: 14px; }
+.ticket-code { width: 132px; height: 132px; border-radius: 8px; }
+.problem { margin: 8px 0; }
+.problem h3 { margin-top: 8px; }
+.dispute-link { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; margin: 16px 0; border-radius: 12px; background: var(--bad-soft); text-decoration: none; color: var(--ink); }
+.dispute-link > div, .dispute-link > span:first-child { display: grid; }
+.dispute-link > span:last-child { font-weight: 700; color: var(--bad); white-space: nowrap; }
+.dispute-link--sm { margin: 4px 0 0; padding: 10px 14px; }
+
+/* Продажа */
+.chosen { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--info); border-radius: 10px; background: var(--info-soft); margin-bottom: 14px; }
+.chosen > div { display: grid; gap: 2px; }
+.chosen .link-btn { margin: 0; }
+.event-search__list { list-style: none; margin: 8px 0 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; max-height: 300px; overflow-y: auto; }
+.event-search__list li + li { border-top: 1px solid var(--line); }
+.event-search__list button { width: 100%; display: grid; gap: 2px; text-align: left; background: none; border: 0; padding: 10px 14px; font: inherit; color: inherit; cursor: pointer; }
+.event-search__list button:hover { background: var(--bg); }
+.event-search__list .event-search__custom { color: var(--info); font-weight: 700; }
+.event-search__none { padding: 10px 14px; }
+.event-search__forbidden { display: grid; gap: 2px; padding: 10px 14px; opacity: .75; cursor: not-allowed; }
+.big-check { width: 60px; height: 60px; margin: 0 auto 14px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); display: grid; place-items: center; font-size: 28px; font-weight: 800; }
+
+/* Прогресс в мастере продажи */
+.progress { margin: 20px 0 16px; }
+.progress__label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.progress__label b { font-size: 16px; }
+.progress__label span { color: var(--ink-2); font-size: 14px; }
+.progress__track { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.progress__track span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .35s ease; }
+
+/* Выбор способа выплаты */
+.segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+.segmented button { display: grid; gap: 2px; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.segmented button small { color: var(--ink-2); font-size: 12px; }
+.segmented button:hover { border-color: var(--line-strong); }
+.segmented button.on { border-color: var(--accent); background: var(--accent-soft); }
+@media (max-width: 720px) { .segmented { grid-template-columns: 1fr; } }
+
+/* Выплаты в профиле */
+.narrow-panel { max-width: 640px; }
+.payout-current { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 14px; }
+
+/* Вход */
+.login__links { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.link-btn:disabled { color: var(--ink-2); text-decoration: none; cursor: default; }
+
+/* Повтор покупки */
+.retry { display: grid; gap: 8px; margin-top: 14px; }
+.retry__actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: inherit; }
+.center .retry__actions { justify-content: center; }
+
+/* Снять с продажи */
+.cancel-sale { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cancel-sale p { flex-basis: 100%; margin: 0; }

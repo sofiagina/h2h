@@ -1,0 +1,44 @@
+/* Списки в кабинете и админке */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 20px; overflow-x: auto; }
+.tabs button { border: 0; background: none; font: inherit; font-weight: 600; padding: 10px 14px; cursor: pointer; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tabs button.active { color: var(--ink); border-bottom-color: var(--ink); }
+.tab-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: var(--bad); color: #fff; font-size: 12px; font-weight: 800; }
+.items { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.item { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; text-decoration: none; flex-wrap: wrap; }
+a.item:hover { border-color: var(--line-strong); }
+.item > div:first-child, .item__top > div:first-child { display: grid; gap: 2px; }
+.item__right { display: flex; align-items: center; gap: 12px; }
+.item--col { display: grid; gap: 10px; }
+.item__top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.payout-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* Статусы */
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+.badge--ok { background: var(--ok-soft); color: var(--ok); }
+.badge--warn { background: var(--warn-soft); color: var(--warn); }
+.badge--bad { background: var(--bad-soft); color: var(--bad); }
+.badge--info { background: var(--info-soft); color: var(--info); }
+.badge--muted { background: var(--bg); color: var(--ink-2); }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.alert { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; margin: 12px 0; font-size: 15px; }
+.alert--error { background: var(--bad-soft); color: var(--bad); }
+.alert--warn { background: var(--warn-soft); color: var(--warn); }
+.alert--info { background: var(--info-soft); color: var(--info); }
+.spinner { display: flex; align-items: center; gap: 10px; color: var(--ink-2); padding: 24px 0; }
+.spinner__dot { width: 18px; height: 18px; border: 2.5px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty { text-align: center; padding: 32px 16px; background: var(--surface); border: 1px dashed var(--line); border-radius: var(--radius); }
+
+/* Лента уведомлений */
+.notice { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; flex-wrap: nowrap; }
+.notice__body { display: grid; gap: 2px; min-width: 0; }
+.notice__body .small { overflow-wrap: anywhere; }
+.notice__icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--bg); color: var(--ink-2); }
+.notice__icon--bad { background: var(--bad-soft); color: var(--bad); }
+.notice__at { white-space: nowrap; }
+.notice--new { border-color: var(--accent); }
+.notice--new strong::after { content: ''; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+@media (max-width: 560px) {
+  .notice { grid-template-columns: auto 1fr; }
+  .notice__at { grid-column: 2; }
+}

@@ -1,0 +1,20 @@
+/* Страница «Как это работает» */
+.why { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.why__item { display: grid; gap: 8px; padding: 22px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+.why__item svg { color: var(--accent); }
+.why__item b { font-size: 18px; }
+.why__item p { margin: 0; color: var(--ink-2); }
+.how-steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.how-steps li { position: relative; display: grid; gap: 8px; padding: 22px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
+.how-steps__icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 12px; background: var(--accent-soft); color: var(--accent); }
+.how-steps__num { position: absolute; top: 6px; right: 16px; font-size: 64px; font-weight: 800; line-height: 1; color: var(--line); }
+.how-steps p { margin: 0; color: var(--ink-2); }
+.guarantee-band { display: flex; gap: 18px; align-items: flex-start; padding: 24px; border-radius: 14px; background: var(--ok-soft); color: var(--ok-ink); }
+.guarantee-band b { font-size: 18px; }
+.guarantee-band p { margin: 4px 0 0; }
+.faq { border-top: 1px solid var(--line); }
+.faq__item { border-bottom: 1px solid var(--line); }
+.faq__item button { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 0; border: 0; background: none; font: inherit; font-weight: 700; color: var(--ink); cursor: pointer; text-align: left; }
+.faq__item button svg { transition: transform .2s; flex: none; color: var(--ink-2); }
+.faq__item.open button svg { transform: rotate(90deg); }
+.faq__item p { margin: 0 0 16px; color: var(--ink-2); overflow: hidden; }

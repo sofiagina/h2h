@@ -1,0 +1,113 @@
+:root {
+  --bg: #f6f6f7;
+  --surface: #ffffff;
+  --ink: #111827;
+  --ink-2: #6b7280;
+  --line: #e5e7eb;
+  --line-strong: #cfd3da;
+  --accent: #ff5a36;
+  --accent-hover: #ef4a26;
+  --accent-soft: #fff1ec;
+  --ok: #0f8a4f;
+  --ok-soft: #e7f6ee;
+  --ok-ink: #0b5e37;
+  --warn: #9a5b00;
+  --warn-soft: #fff5df;
+  --warn-ink: #6d4300;
+  --bad: #c62f2f;
+  --bad-soft: #fdecec;
+  --info: #2f49d1;
+  --info-soft: #eceffd;
+  --on-ink: #ffffff;
+  /** Тёмные карточки (билет, плашка «Продать») — тёмные в обеих темах. */
+  --dark-card: #111827;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgb(17 24 39 / 5%), 0 4px 16px rgb(17 24 39 / 5%);
+  color-scheme: light;
+}
+
+/* Тёмная тема: по настройке системы, если пользователь не выбрал светлую, или по явному выбору. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --ink: #e8eaef;
+    --ink-2: #9aa1ad;
+    --line: #2a2f3a;
+    --line-strong: #3d4452;
+    --accent: #ff6a48;
+    --accent-hover: #ff8264;
+    --accent-soft: #3a1f18;
+    --ok: #4cc68a;
+    --ok-soft: #13291f;
+    --ok-ink: #a6e6c4;
+    --warn: #f0b453;
+    --warn-soft: #2e2412;
+    --warn-ink: #f3d39a;
+    --bad: #ff7a7a;
+    --bad-soft: #351b1d;
+    --info: #93a5ff;
+    --info-soft: #1c2242;
+    --on-ink: #0f1115;
+    --dark-card: #242a3a;
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 16px rgb(0 0 0 / 35%);
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --bg: #0f1115;
+  --surface: #171a21;
+  --ink: #e8eaef;
+  --ink-2: #9aa1ad;
+  --line: #2a2f3a;
+  --line-strong: #3d4452;
+  --accent: #ff6a48;
+  --accent-hover: #ff8264;
+  --accent-soft: #3a1f18;
+  --ok: #4cc68a;
+  --ok-soft: #13291f;
+  --ok-ink: #a6e6c4;
+  --warn: #f0b453;
+  --warn-soft: #2e2412;
+  --warn-ink: #f3d39a;
+  --bad: #ff7a7a;
+  --bad-soft: #351b1d;
+  --info: #93a5ff;
+  --info-soft: #1c2242;
+  --on-ink: #0f1115;
+  --dark-card: #242a3a;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 16px rgb(0 0 0 / 35%);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  transition: background .2s, color .2s;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.5 Manrope, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { line-height: 1.2; margin: 0 0 .5em; letter-spacing: -.01em; }
+h1 { font-size: clamp(28px, 4vw, 44px); font-weight: 800; }
+h2, .h2 { font-size: clamp(20px, 2.6vw, 26px); font-weight: 800; }
+h3, .h3 { font-size: 17px; font-weight: 700; }
+p { margin: 0 0 .75em; }
+a { color: inherit; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
+
+.container { width: min(1080px, 100% - 32px); margin-inline: auto; }
+.section { padding: 32px 0; }
+.narrow { max-width: 680px; }
+.center { text-align: center; }
+.muted { color: var(--ink-2); }
+.small { font-size: 13px; }
+.lead { font-size: 18px; color: var(--ink-2); }
+.eyebrow { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; opacity: .8; }
+.ok-text { color: var(--ok); font-weight: 600; }
+.bad-text { color: var(--bad); }
+.field-error { color: var(--bad); font-size: 14px; margin: 8px 0 0; }
+.stack { display: grid; gap: 8px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.actions.center { justify-content: center; }

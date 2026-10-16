@@ -1,0 +1,10 @@
+/* Порядок подключения = порядок каскада: ниже перебивает то, что выше. */
+@import './base.css';
+@import './ui.css';
+@import './layout.css';
+@import './catalog.css';
+@import './flows.css';
+@import './account.css';
+@import './disputes.css';
+@import './admin.css';
+@import './info.css';

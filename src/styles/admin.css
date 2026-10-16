@@ -1,0 +1,37 @@
+/* Админка */
+.agg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-top: 12px; }
+.agg__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.agg__head h3 { margin: 0; }
+.spark { display: flex; align-items: flex-end; gap: 3px; height: 52px; padding: 6px; background: var(--bg); border-radius: 8px; }
+.spark span { flex: 1; background: var(--ok); border-radius: 2px; opacity: .75; min-height: 4px; }
+.spark span.fail { background: var(--bad); opacity: 1; }
+.agg__stats { display: flex; justify-content: space-between; color: var(--ink-2); margin: 8px 0 12px; }
+.sales-state { font-weight: 800; padding: 9px 12px; border-radius: 10px; margin-bottom: 12px; }
+.sales-state.on { background: var(--ok-soft); color: var(--ok); }
+.sales-state.off { background: var(--bad-soft); color: var(--bad); }
+.agg__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th, .table td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.table th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); }
+.mt { margin-top: 28px; }
+
+/* Модерация заявок */
+.review__badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.score { display: inline-grid; place-items: center; min-width: 40px; height: 32px; padding: 0 8px; border-radius: 10px; font-weight: 800; font-size: 15px; }
+.score--ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.score--warn { background: color-mix(in srgb, #d99a00 18%, transparent); color: #b07d00; }
+.score--bad { background: var(--bad-soft); color: var(--bad); }
+.signals { list-style: none; margin: 0 0 12px; padding: 10px 12px; display: grid; gap: 4px; border-radius: 10px; background: var(--bg); }
+.signals li { font-weight: 500; }
+.request-row { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; align-items: center; }
+.request-row:hover { border-color: var(--line-strong); }
+.request-row__body { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.request-form__badges { justify-content: flex-start; margin-bottom: 12px; }
+.seller-chip { display: inline-block; margin-right: 10px; }
+.checklist { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 2px; margin: 0 0 14px; }
+.checklist legend { padding: 0 6px; }
+.checklist .check { margin: 6px 0 10px; font-weight: 500; }
+.kv .links { display: grid; gap: 2px; overflow-wrap: anywhere; }
+.suspicious > summary { cursor: pointer; font-weight: 700; padding: 10px 0; }
+.suspicious[open] > summary { margin-bottom: 8px; }

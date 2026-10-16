@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -32,6 +33,7 @@ export default defineConfig({
   // На GitHub Pages сайт живёт в /<repo>/ — путь передаёт workflow через BASE_PATH.
   base: process.env.BASE_PATH ?? '/',
   plugins: [react(), apiDocs()],
+  resolve: { alias: { '@': resolve(import.meta.dirname, 'src') } },
   server: {
     port: 5173,
     // Для работы с настоящим бэком: VITE_USE_MOCK=false.

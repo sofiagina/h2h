@@ -6,8 +6,8 @@
 и выпускает новый на покупателя, продавцу мы переводим номинал.
 
 - **Правила проекта и контракт с фронтом — в [CLAUDE.md](CLAUDE.md).** Начинать оттуда.
-- Фронт: `git.tunele.ru/h2h/Front-AdminPanel`. Его `src/api/types.ts` и `README.md` задают контракт,
-  `src/api/mock.ts` описывает ожидаемое поведение.
+- Фронт: `git.tunele.ru/h2h/Front-AdminPanel`. Его `src/core/api/types.ts` и `README.md` задают контракт,
+  `src/core/api/mock.ts` описывает ожидаемое поведение.
 - Развёртывание, nginx, CI/CD: [deploy/README.md](deploy/README.md).
 
 ## Каркас приложения
